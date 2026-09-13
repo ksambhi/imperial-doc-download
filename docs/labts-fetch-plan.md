@@ -6,8 +6,11 @@ printed to the terminal. Cloning those repos is a **separate, later** pipeline s
 this step only produces the list.
 
 Everything below was verified against the live site (`teaching.doc.ic.ac.uk/labts`)
-on 2026-09-13 with Kishan's account. Selectors, URL shapes and timings are measured,
-not guessed.
+on 2026-09-13. Selectors, URL shapes and timings are measured, not guessed.
+
+Repository names and commit hashes in the examples are anonymised, matching the
+committed fixtures — real run output contains personal data and is gitignored,
+never committed. Keep it that way when editing this doc.
 
 ---
 
@@ -120,7 +123,7 @@ Consequences:
   - clone URLs — **identical** (one repo per exercise)
   - milestone dropdown — **identical**, lists all 3 (so one fetch gives the full list)
   - submitted revision — **different for every milestone**:
-    `bc9dc865…`, `efe2589e…`, `bccab1dc…`
+    `113c9ed0…`, `6d2449e4…`, `f0e594a3…`
 
   So "the submitted revision" is a property of **(exercise, milestone)**, not of the
   exercise. See §3 for what this means for the schema.
@@ -145,8 +148,8 @@ where the year-page column only gives an ordinal ("1"); keep both.
 |---|---|---|
 | `submitted` | `label-success`, text `Submitted revision:` + `<a>` whose text is the 40-char SHA | normal submitted case |
 | `unsubmitted` | `label-warning`, `Currently Unsubmitted` | nothing submitted |
-| `mismatch` | `label-danger`, `Warning: Submitted Commit Does Not Match This Repo` | e.g. `SED_Ex3` (2324) |
-| `not_enabled` | **no banner element at all** | submission was never enabled — exam/test repos (`cfinaltest`, `javainterimtestparta`, …). 9 such repos on this account |
+| `mismatch` | `label-danger`, `Warning: Submitted Commit Does Not Match This Repo` | e.g. one 2324 exercise |
+| `not_enabled` | **no banner element at all** | submission was never enabled — exam/test repos never used for a submission; 9 such repos on this account |
 
 Parse defensively: absence of the banner is a valid state, not an error. Store the
 banner's raw text too, so an unseen fifth variant survives into the JSON.
@@ -215,10 +218,10 @@ session cookie of the response it came from, so a cached one would fail the logi
       "exercise_id": "809",
       "repository_id": "99068",
       "labts_url": "https://teaching.doc.ic.ac.uk/labts/lab_exercises/2324/exercises/809/repository/99068",
-      "gitlab_url": "https://gitlab.doc.ic.ac.uk/lab2324_autumn/pintos_17",
+      "gitlab_url": "https://gitlab.doc.ic.ac.uk/lab2324_autumn/pintos_99",
       "clone_urls": {
-        "ssh": "git@gitlab.doc.ic.ac.uk:lab2324_autumn/pintos_17.git",
-        "https": "https://gitlab.doc.ic.ac.uk/lab2324_autumn/pintos_17.git"
+        "ssh": "git@gitlab.doc.ic.ac.uk:lab2324_autumn/pintos_99.git",
+        "https": "https://gitlab.doc.ic.ac.uk/lab2324_autumn/pintos_99.git"
       },
       "has_submission": true,
       "submitted_revision": null,
@@ -229,10 +232,10 @@ session cookie of the response it came from, so a cached one would fail the logi
           "year_page_label": "1: PintOS Task 1 - Scheduling",
           "submission_status": "Submitted",
           "submission_state": "submitted",
-          "submitted_revision": "bc9dc8653b3e001125f67cbe07f4e20c447cc6da"
+          "submitted_revision": "113c9ed0314d7cfc5e93b58a480284a8e0445e7f"
         },
-        { "id": "1122", "…": "…", "submitted_revision": "efe2589e4e1345235c2f15ad9e0fc3218510b032" },
-        { "id": "1123", "…": "…", "submitted_revision": "bccab1dcfba696b66cf8b02c8224946c223ca206" }
+        { "id": "1122", "…": "…", "submitted_revision": "6d2449e4e20c1dc20f825bce544c5bbf8c5130fa" },
+        { "id": "1123", "…": "…", "submitted_revision": "f0e594a3ce21670658cc67cf9093740f3289724c" }
       ]
     }
   ]
@@ -358,11 +361,11 @@ then a summary line. Suggested columns:
 ┏━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┓
 ┃ Exercise           ┃ Kind       ┃ Milestone                   ┃ Submitted  ┃
 ┡━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━┩
-│ pintos             │ group      │ PintOS Task 1 - Scheduling  │ bc9dc865   │
-│                    │            │ PintOS Task 2 - User Progr… │ efe2589e   │
-│                    │            │ PintOS Task 3 - Virtual Mem │ bccab1dc   │
-│ SED_Ex3            │ individual │ Reuse                       │ ⚠ mismatch │
-│ c_pic_proc         │ individual │ 1                           │ — unsubmit │
+│ pintos             │ group      │ PintOS Task 1 - Scheduling  │ 113c9ed0   │
+│                    │            │ PintOS Task 2 - User Progr… │ 6d2449e4   │
+│                    │            │ PintOS Task 3 - Virtual Mem │ f0e594a3   │
+│ some_exercise      │ individual │ Reuse                       │ ⚠ mismatch │
+│ another_exercise   │ individual │ 1                           │ — unsubmit │
 └────────────────────┴────────────┴─────────────────────────────┴────────────┘
 ```
 
