@@ -192,9 +192,12 @@ or back up. (The committed fixtures have it replaced with fake names.)
 | Full cold run @ 1.5s delay | **≈ 4–6 minutes** |
 | Resulting JSON | ~55 KB |
 
-Because a cold run is minutes long, add an **opt-in HTML cache** (`--cache-dir`,
-default off or under `output_dir/.cache/labts/`, keyed by a hash of the URL). This
-makes re-runs during development instant and is the single biggest quality-of-life win.
+Because a cold run is minutes long, there is an **opt-in page cache**: `--cache-dir DIR`
+stores each fetched page under a readable slug of its URL plus a short hash. A cache
+hit costs no request, no delay and no login, so a fully cached re-run does zero
+network I/O. Measured: **4m22s cold → 2.1s warm (83 hits, 0 fetches)**, byte-identical
+output. The sign-in page is deliberately never cached — its CSRF token is tied to the
+session cookie of the response it came from, so a cached one would fail the login.
 
 ---
 

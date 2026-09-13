@@ -44,9 +44,17 @@ in a Python import name.)
 ### `labts_fetch`
 
 Logs in to LabTS, walks every academic year, and writes the list of GitLab
-repositories behind every exercise to `<output_dir>/labts-list.json` —
-clone URLs (ssh + https), the milestones, and the submitted revision for
-each milestone. Cloning those repos is a later, separate step.
+repositories behind every exercise. Cloning those repos is a later,
+separate step. Two files are produced:
+
+- `<output_dir>/labts-list.json` — the full record: clone URLs (ssh +
+  https), the milestones, and the submitted revision for each milestone
+- `<output_dir>/labts-list.txt` — just the ssh clone URLs, grouped by
+  academic year, for feeding straight into the clone step
+
+Both land in `--output-dir`. Real output contains personal data, so
+output directories (including `results/`, the conventional place to put a
+real run) are gitignored and must not be committed.
 
 Requires `IMPERIAL_USERNAME` and `IMPERIAL_PASSWORD` in the environment.
 
@@ -56,6 +64,11 @@ backoff. It is also **GET-only by construction** — LabTS pages carry forms
 that submit coursework late or queue jobs on the shared test-VM fleet, so
 there is deliberately no `post()` helper anywhere except the login itself.
 A full run is roughly 4–6 minutes.
+
+Pass `--cache-dir DIR` to cache fetched pages there and reuse them next
+time. A cache hit costs no request, no delay and no login, so a fully
+cached re-run does zero network I/O — measured at **4m22s → 2.1s**, with
+byte-identical output. Delete the directory to force a refetch.
 
 See `docs/labts-fetch-plan.md` for how the site was reverse-engineered and
 why the output is shaped the way it is.
@@ -71,6 +84,9 @@ uv run imperial-doc-download run --output-dir ./imperial-data --dry-run
 export IMPERIAL_USERNAME=abc123
 export IMPERIAL_PASSWORD=...        # or you'll be told what's missing up front
 uv run imperial-doc-download run --output-dir ./imperial-data
+
+# re-runs are instant when pages are cached
+uv run imperial-doc-download run --output-dir ./imperial-data --cache-dir ./cache
 ```
 
 `--dry-run` lists the steps that would run without downloading anything.

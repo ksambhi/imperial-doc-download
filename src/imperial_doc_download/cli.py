@@ -55,6 +55,14 @@ def run(
         "--dry-run",
         help="Print the steps that would run without downloading anything.",
     ),
+    cache_dir: Path | None = typer.Option(
+        None,
+        "--cache-dir",
+        help=(
+            "Cache fetched pages here and reuse them on later runs. "
+            "Makes re-runs near-instant; delete the directory to refetch."
+        ),
+    ),
 ) -> None:
     """Run the full download pipeline."""
     settings = Settings.from_env()
@@ -63,7 +71,7 @@ def run(
 
     # More steps get registered here as each `*_fetch` module is implemented,
     # e.g. imperial_doc_download.gitlab_fetch.GitlabFetchStep().
-    pipeline = Pipeline(steps=[LabtsFetchStep()])
+    pipeline = Pipeline(steps=[LabtsFetchStep(cache_dir=cache_dir)])
     pipeline.run(ctx)
 
 

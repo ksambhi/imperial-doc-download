@@ -1,9 +1,11 @@
 """`LabtsFetchStep`: log in to LabTS, walk every academic year, and produce
 the list of GitLab repositories behind every exercise.
 
-Cloning those repos is a later, separate pipeline step -- this step only
-produces `<output_dir>/labts-list.json` (and stashes the same data in
-`ctx.state["labts_exercises"]`). See `docs/labts-fetch-plan.md` throughout.
+Cloning those repos is a later, separate pipeline step. This step writes
+`<output_dir>/labts-list.json` (the full record) and
+`<output_dir>/labts-list.txt` (just the ssh clone URLs, grouped by year,
+for feeding straight into the clone step), and stashes the same data in
+`ctx.state["labts_exercises"]`. See `docs/labts-fetch-plan.md` throughout.
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 _SHORT_SHA_LEN = 8
 _OUTPUT_FILENAME = "labts-list.json"
+_SSH_LIST_FILENAME = "labts-list.txt"
 
 _SUBMISSION_DISPLAY = {
     "unsubmitted": "— unsubmitted",
@@ -42,11 +45,13 @@ class LabtsFetchStep(Step):
 
     name = "labts-fetch"
 
-    def __init__(self, *, delay: float = 1.5) -> None:
-        # No network or filesystem I/O here: construction must stay free of
-        # side effects so `--dry-run` (which never calls `run()`) and
-        # pipeline setup remain instant and offline.
+    def __init__(self, *, delay: float = 1.5, cache_dir: Path | str | None = None) -> None:
+        # No network or filesystem I/O here (the cache directory is only
+        # created once something is actually written to it): construction
+        # must stay free of side effects so `--dry-run` (which never calls
+        # `run()`) and pipeline setup remain instant and offline.
         self._delay = delay
+        self._cache_dir = cache_dir
 
     def run(self, ctx: PipelineContext) -> None:
         settings = ctx.settings
@@ -56,26 +61,39 @@ class LabtsFetchStep(Step):
                 "to be set in the environment."
             )
 
-        client = LabtsClient(settings.username, settings.password, delay=self._delay)
+        client = LabtsClient(
+            settings.username,
+            settings.password,
+            delay=self._delay,
+            cache_dir=self._cache_dir,
+        )
         try:
             results = self._fetch_all_years(client)
         finally:
+            if self._cache_dir is not None:
+                logger.info(
+                    "Cache: %d hit(s), %d fetched page(s) written to %s",
+                    client.cache_hits,
+                    client.cache_misses,
+                    self._cache_dir,
+                )
             client.close()
 
         output_path = self._write_json(ctx, results)
+        ssh_list_path = self._write_ssh_list(ctx, results)
         ctx.state["labts_exercises"] = results
-        self._print_report(results, output_path)
+        self._print_report(results, output_path, ssh_list_path)
 
     def _fetch_all_years(self, client: LabtsClient) -> dict[str, list[Exercise]]:
-        landing_page = client.get("/labts")
-        years = parse_academic_years(landing_page.text)
+        landing_page = client.get_html("/labts")
+        years = parse_academic_years(landing_page)
         logger.info("LabTS advertises %d academic year(s).", len(years))
 
         results: dict[str, list[Exercise]] = {}
         for year in years:
             logger.info("Fetching year %s", year)
-            year_page = client.get(f"/labts/home/index/{year}")
-            rows = parse_year_page(year_page.text)
+            year_page = client.get_html(f"/labts/home/index/{year}")
+            rows = parse_year_page(year_page)
 
             if not rows:
                 logger.info("Year %s has no exercises -- skipping.", year)
@@ -132,8 +150,8 @@ class LabtsFetchStep(Step):
                 first_row.kind,
                 row.milestone_id,
             )
-            detail_response = client.get(row.detail_url)
-            detail = parse_detail_page(detail_response.text)
+            detail_html = client.get_html(row.detail_url)
+            detail = parse_detail_page(detail_html)
 
             if detail.selected_milestone_id is not None and (
                 detail.selected_milestone_id != row.milestone_id
@@ -183,7 +201,22 @@ class LabtsFetchStep(Step):
         logger.info("Wrote %s", output_path)
         return output_path
 
-    def _print_report(self, results: dict[str, list[Exercise]], output_path: Path) -> None:
+    def _write_ssh_list(self, ctx: PipelineContext, results: dict[str, list[Exercise]]) -> Path:
+        """Write the plain-text list of ssh clone URLs, grouped by year."""
+        output_path = ctx.output_dir / _SSH_LIST_FILENAME
+
+        blocks = []
+        for year, exercises in results.items():
+            urls = [ex.clone_urls["ssh"] for ex in exercises if ex.clone_urls.get("ssh")]
+            blocks.append("\n".join([f"# {year}", *urls]))
+
+        output_path.write_text("\n\n".join(blocks) + "\n", encoding="utf-8")
+        logger.info("Wrote %s", output_path)
+        return output_path
+
+    def _print_report(
+        self, results: dict[str, list[Exercise]], output_path: Path, ssh_list_path: Path
+    ) -> None:
         console = Console()
         total_repos = 0
 
@@ -207,7 +240,9 @@ class LabtsFetchStep(Step):
             console.print(table)
 
         console.print(
-            f"{total_repos} repositories across {len(results)} academic years → {output_path}"
+            f"{total_repos} repositories across {len(results)} academic years\n"
+            f"  → {output_path}\n"
+            f"  → {ssh_list_path} (ssh clone URLs only)"
         )
 
 

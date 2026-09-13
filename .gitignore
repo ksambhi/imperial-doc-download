@@ -219,3 +219,11 @@ __marimo__/
 
 # Runtime log files written by imperial-doc-download itself
 logs/
+
+# Output and page caches from real runs. Real output contains personal
+# data (coursework repo names, commit history) and must never be committed.
+/imperial-data/
+/out/
+/cache/
+.cache/
+/results/

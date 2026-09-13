@@ -18,8 +18,11 @@ Hard safety rules (`docs/labts-fetch-plan.md` §1) enforced by this module:
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import re
 import time
+from pathlib import Path
 
 import httpx
 
@@ -64,6 +67,7 @@ class LabtsClient:
         delay: float = 1.5,
         base_url: str = BASE_URL,
         transport: httpx.BaseTransport | None = None,
+        cache_dir: Path | str | None = None,
     ) -> None:
         if not username or not password:
             raise ValueError("LabtsClient requires both a username and a password.")
@@ -71,7 +75,11 @@ class LabtsClient:
         self._username = username
         self._password = password
         self._delay = delay
+        self._base_url = base_url
         self._logged_in = False
+        self._cache_dir = Path(cache_dir) if cache_dir is not None else None
+        self.cache_hits = 0
+        self.cache_misses = 0
         self._client = httpx.Client(
             base_url=base_url,
             follow_redirects=True,
@@ -88,14 +96,24 @@ class LabtsClient:
     def close(self) -> None:
         self._client.close()
 
-    def get(self, url: str) -> httpx.Response:
-        """GET `url` (absolute, or relative to the LabTS base URL).
+    def get_html(self, url: str) -> str:
+        """Fetch `url` (absolute, or relative to the LabTS base URL) as HTML.
 
-        Logs in first if this is the first call. Retries on `httpx.HTTPError`
-        with exponential backoff, then sleeps the configured delay before
-        returning -- so every call to this method is naturally throttled
-        and requests stay strictly sequential.
+        Served from the on-disk cache when one is configured and the page
+        is already there -- a cache hit costs no request, no delay, and no
+        login, so a fully cached re-run touches the network zero times.
+
+        Otherwise: logs in if this is the first real request, retries on
+        `httpx.HTTPError` with exponential backoff, caches the result, then
+        sleeps the configured delay before returning -- so every live fetch
+        is naturally throttled and requests stay strictly sequential.
         """
+        cached = self._cache_read(url)
+        if cached is not None:
+            self.cache_hits += 1
+            logger.info("GET %s (cached)", url)
+            return cached
+
         if not self._logged_in:
             self._login()
 
@@ -103,11 +121,46 @@ class LabtsClient:
         response = self._request_with_retry(url)
         self._raise_if_session_expired(response)
 
+        self.cache_misses += 1
+        self._cache_write(url, response.text)
         time.sleep(self._delay)
-        return response
+        return response.text
+
+    def _cache_path(self, url: str) -> Path | None:
+        """Readable, collision-free cache filename for `url`.
+
+        A slug of the URL keeps the cache directory browsable; the hash
+        suffix guarantees uniqueness once the slug is truncated.
+        """
+        if self._cache_dir is None:
+            return None
+        absolute = str(httpx.URL(self._base_url).join(url))
+        slug = re.sub(r"[^A-Za-z0-9]+", "_", absolute.removeprefix("https://")).strip("_")
+        digest = hashlib.sha256(absolute.encode()).hexdigest()[:8]
+        return self._cache_dir / f"{slug[:100]}-{digest}.html"
+
+    def _cache_read(self, url: str) -> str | None:
+        path = self._cache_path(url)
+        if path is None or not path.is_file():
+            return None
+        return path.read_text(encoding="utf-8")
+
+    def _cache_write(self, url: str, html: str) -> None:
+        path = self._cache_path(url)
+        if path is None:
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(html, encoding="utf-8")
 
     def _login(self) -> None:
-        """POST the sign-in form. The only POST anywhere in this codebase."""
+        """POST the sign-in form. The only POST anywhere in this codebase.
+
+        Note this deliberately fetches the sign-in page through
+        `_request_with_retry` rather than `get_html`: the CSRF token is tied
+        to the session cookie of the response it came from, so a cached
+        sign-in page would hand back a stale token and the login would fail.
+        Never route this through the cache.
+        """
         logger.info("GET %s (sign-in page)", SIGN_IN_PATH)
         sign_in_page = self._request_with_retry(SIGN_IN_PATH)
         token = parse_csrf_token(sign_in_page.text)
