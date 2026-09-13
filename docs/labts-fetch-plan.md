@@ -217,6 +217,8 @@ makes re-runs during development instant and is the single biggest quality-of-li
         "ssh": "git@gitlab.doc.ic.ac.uk:lab2324_autumn/pintos_17.git",
         "https": "https://gitlab.doc.ic.ac.uk/lab2324_autumn/pintos_17.git"
       },
+      "has_submission": true,
+      "submitted_revision": null,
       "milestones": [
         {
           "id": "1121",
@@ -234,14 +236,32 @@ makes re-runs during development instant and is the single biggest quality-of-li
 }
 ```
 
-**Deviation from the brief, and why.** The brief asked for `submitted_revision` as a
-single field on the exercise. That can't represent pintos/WACC, which have a distinct
-submitted SHA per milestone (§2.4). So `submitted_revision` lives **inside each
-milestone**. For the 63 single-milestone exercises this is just a one-element list,
-so nothing is lost; for the 2 multi-milestone ones nothing is silently dropped.
-Flagged to Kishan as an open question — if she prefers, add a convenience
-top-level `submitted_revision` that mirrors the single-milestone case and is `null`
-when ambiguous.
+**Two extra fields, per Kishan's decisions:**
+
+- **`submitted_revision` (top level)** is a *convenience mirror*: when the exercise has
+  exactly one milestone it repeats that milestone's revision (which may itself be
+  `null`); when the exercise has more than one milestone it is **always `null`**,
+  because there is no single correct answer. The authoritative values always live in
+  `milestones[].submitted_revision`. On this account it is non-null for 43 of 65
+  exercises, and `null` for the 2 multi-milestone ones (pintos, WACC).
+
+  ```python
+  submitted_revision = (
+      milestones[0].submitted_revision if len(milestones) == 1 else None
+  )
+  ```
+
+- **`has_submission` (bool)** = `any(m.submitted_revision for m in milestones)`. Lets
+  the later clone step trivially skip repos that were never submitted to. On this
+  account: **45 true / 20 false**.
+
+Every exercise is kept in the output regardless of `has_submission` — the 9
+submission-never-enabled exam repos and the never-started ones still contain clonable
+skeleton or partial work, so nothing is dropped at this stage.
+
+The brief asked for a single `submitted_revision` per exercise. That alone can't
+represent pintos/WACC, which have a distinct submitted SHA per milestone (§2.4),
+hence the per-milestone values plus the mirror above.
 
 Wrap the year map in a small envelope if convenient (`{"generated_at":…, "username":…, "years":{…}}`),
 but the brief said "object grouped by academic year", so **keep `years` as the top level**
@@ -317,6 +337,8 @@ Tests worth writing (all offline):
 - year page → 24 rows; dedupe → 20 exercises; pintos has exactly 3 milestones
 - each of the 4 submission states maps to the right `submission_state`/`submitted_revision`
 - clone URLs parse for ssh **and** https, with the `git clone ` prefix stripped
+- `submitted_revision` mirror: set for a single-milestone exercise, `null` for pintos
+- `has_submission`: true for `detail_submitted`, false for unsubmitted/mismatch/not-enabled
 - group members never appear anywhere in the serialised output
 - session-expiry detection: a response whose URL is `/users/sign_in` raises
 
@@ -351,17 +373,16 @@ followable in both the terminal and `logs/*.log` — a 5-minute silent step feel
 
 ---
 
-## 8. Open questions for Kishan
+## 8. Decisions taken (previously open)
 
-1. **Per-milestone revisions** (§3) — confirm milestones carrying their own
-   `submitted_revision` is right, vs. a single top-level field.
-2. The brief said *"For submitted assignments, extract only the clone URL and list of
-   milestones"*, which reads inverted — unsubmitted exercises are the ones with no
-   revision to extract. This plan **extracts everything available for every exercise**
-   and sets `submitted_revision: null` where there isn't one. Confirm that's what you meant.
-3. **Blank/unsubmitted repos** — 9 exam repos (`cfinaltest`, `javainterimtest*`, …)
-   and several never-started ones are included in the list. Keep them (they still have
-   clonable repos with skeleton code), or filter them out for the clone step?
+1. **Per-milestone revisions + convenience mirror** — settled, see §3. Milestones own
+   the authoritative `submitted_revision`; the exercise carries a top-level mirror
+   that is `null` whenever there is more than one milestone.
+2. The brief's *"For submitted assignments, extract only the clone URL and list of
+   milestones"* read inverted (unsubmitted exercises are the ones with no revision).
+   Resolved as: **extract everything available for every exercise**, with
+   `submitted_revision: null` where there isn't one.
+3. **Unused repos are kept and flagged** via `has_submission` — settled, see §3.
 4. **Year 2627** is advertised and currently blank. Harmless, just skipped.
 
 ## 9. Security note
