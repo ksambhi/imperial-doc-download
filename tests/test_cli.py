@@ -21,20 +21,45 @@ def test_version() -> None:
     assert "imperial-doc-download" in result.stdout
 
 
-def test_run_dry_run_creates_output_dir(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("command", "step_name"),
+    [("labts", "labts-fetch"), ("scientia", "scientia-fetch")],
+)
+def test_each_pipeline_is_its_own_subcommand(tmp_path: Path, command: str, step_name: str) -> None:
     output_dir = tmp_path / "data"
-    result = runner.invoke(app, ["run", "--dry-run", "--output-dir", str(output_dir)])
+    result = runner.invoke(app, [command, "--dry-run", "--output-dir", str(output_dir)])
 
     assert result.exit_code == 0
     assert output_dir.is_dir()
     # --dry-run must never touch the network: the runner skips every step
     # rather than calling its run(), so only the "would run" log line shows.
-    assert "would run step: labts-fetch" in result.output
+    assert f"would run step: {step_name}" in result.output
+
+
+def test_subcommands_are_listed_in_help() -> None:
+    result = runner.invoke(app, ["--help"])
+
+    assert result.exit_code == 0
+    assert "labts" in result.output
+    assert "scientia" in result.output
+
+
+def test_labts_takes_a_cache_dir_but_scientia_does_not() -> None:
+    assert "--cache-dir" in runner.invoke(app, ["labts", "--help"]).output
+    assert "--cache-dir" not in runner.invoke(app, ["scientia", "--help"]).output
 
 
 def test_run_writes_a_log_file(tmp_path: Path) -> None:
-    result = runner.invoke(app, ["run", "--dry-run", "--output-dir", str(tmp_path / "data")])
+    result = runner.invoke(app, ["labts", "--dry-run", "--output-dir", str(tmp_path / "data")])
 
     assert result.exit_code == 0
     log_files = list((tmp_path / "logs").glob("*.log"))
     assert len(log_files) == 1
+
+
+def test_unimplemented_pipeline_reports_cleanly_without_a_traceback(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["scientia", "--output-dir", str(tmp_path / "data")])
+
+    assert result.exit_code == 1
+    assert "Not implemented yet" in result.output
+    assert "Traceback" not in result.output

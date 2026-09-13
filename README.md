@@ -36,9 +36,8 @@ authenticated session from a login step to the steps that use it).
 Each Imperial system to back up is its own self-contained module —
 `labts_fetch`, `gitlab_fetch`, `scientia_fetch`, and so on — each
 implementing one `Step` subclass. `labts_fetch` is implemented;
-the rest are still placeholders. As each gets built out, its `Step` gets
-added to the `steps` list in `cli.py`'s `run` command to compose it into
-the pipeline. (Module names use underscores, not hyphens — `-` isn't valid
+the rest are still placeholders. Each gets its own CLI subcommand in
+`cli.py`, so pipelines can be built and run one at a time. (Module names use underscores, not hyphens — `-` isn't valid
 in a Python import name.)
 
 ### `labts_fetch`
@@ -79,15 +78,27 @@ why the output is shaped the way it is.
 uv sync
 
 uv run imperial-doc-download --help
-uv run imperial-doc-download run --output-dir ./imperial-data --dry-run
+uv run imperial-doc-download labts --output-dir ./imperial-data --dry-run
 
 export IMPERIAL_USERNAME=abc123
 export IMPERIAL_PASSWORD=...        # or you'll be told what's missing up front
-uv run imperial-doc-download run --output-dir ./imperial-data
+uv run imperial-doc-download labts --output-dir ./imperial-data
 
 # re-runs are instant when pages are cached
-uv run imperial-doc-download run --output-dir ./imperial-data --cache-dir ./cache
+uv run imperial-doc-download labts --output-dir ./imperial-data --cache-dir ./cache
 ```
+
+There is one subcommand per Imperial system, each running its own
+pipeline:
+
+| Command | Status |
+|---|---|
+| `imperial-doc-download labts` | implemented |
+| `imperial-doc-download scientia` | placeholder |
+
+Eventually the root command will run them all in parallel. That only
+makes sense once each pipeline works on its own, so it isn't wired up
+yet — run them individually for now.
 
 `--dry-run` lists the steps that would run without downloading anything.
 `-v/--verbose` enables debug logging.
