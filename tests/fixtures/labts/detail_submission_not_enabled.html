@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en" ng-app="app">
+<head>
+<title>LabTS</title>
+<meta content="authenticity_token" name="csrf-param"/>
+<meta content="REDACTED" name="csrf-token"/>
+</head>
+<body>
+<div class="container">
+
+ Space for LabTS MOTD  
+
+      <div><p class="deny">
+<strong>Notice:</strong> Due to essential data centre maintenance, several DoC systems (including LabTS) will be unavailable from the afternoon on Friday 23rd Jan until the morning on Monday 26th Jan. All CW deadlines have been updated to fall outside this window, but LabTS will probably be unable to process any test requests during this period.
+        
+        Due to a DoC filesystem issue LabTS is unable to process any test requests. CSG are working on the issue. Sorry for any inconvenience. 
+      
+      </p></div>
+<div class="text-center">
+  Milestone:
+  <select id="switch_milestone" name="switch_milestone" onchange="location.href = '?milestone=' + encodeURIComponent(this.options[this.selectedIndex].value)">
+<option selected="'selected'" value="997">
+        cfinaltest
+      </option>
+</select>
+</div>
+<table ,="" class="table table-striped table-bordered table-condensed" id="commit_table" style="width: 80%; left: 10%; position: relative;">
+<thead>
+<tr>
+<td> Submission Status </td>
+<td> Commit Hash </td>
+<td> Commit Message </td>
+<td> Commit Date </td>
+<td> Testing Status </td>
+<td> Test Result </td>
+<td> Request Test </td>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: center; vertical-align: middle;">
+        Submission Not Enabled
+    </td>
+<td> <a href="https://gitlab.doc.ic.ac.uk/lab2223_summer/cfinaltest_abc123/commit/6f38da9e4f42d1c00b18c964eaf33ac0ccfeefd5">7e6fac58</a> </td>
+<td> Lexis code </td>
+<td> 2023-06-23 14:03:22 UTC </td>
+<td>
+</td>
+<td>
+        Currently Untested
+    </td>
+<td>
+<form action="https://teaching.doc.ic.ac.uk/labts/lab_exercises/2223/exercises/714/repository/97427/request?commit_id=1071659&amp;milestone=997" class="button_to" method="post"><input class="btn btn-primary" style="font-size: 12px;" type="submit" value="Request test"/><input name="authenticity_token" type="hidden" value="XAQt5sg3+FktOR+Et8hpqqGVMiQ26Wr6ToVLiZuN2fiN1OYYZk9+lwNISfZ5fmyaIg6jNfwrGoh+iIR8NZgt/w=="/></form>
+</td>
+</tr>
+<tr>
+<td style="text-align: center; vertical-align: middle;">
+        Submission Not Enabled
+    </td>
+<td> <a href="https://gitlab.doc.ic.ac.uk/lab2223_summer/cfinaltest_abc123/commit/503f4a8c14021d079251d02998e8e0b235636617">558151f5</a> </td>
+<td> Original skeleton </td>
+<td> 2023-06-23 12:58:28 UTC </td>
+<td>
+</td>
+<td>
+        Currently Untested
+    </td>
+<td>
+<form action="https://teaching.doc.ic.ac.uk/labts/lab_exercises/2223/exercises/714/repository/97427/request?commit_id=1071295&amp;milestone=997" class="button_to" method="post"><input class="btn btn-primary" style="font-size: 12px;" type="submit" value="Request test"/><input name="authenticity_token" type="hidden" value="RyglEKGExyZCPOdpDh3NxaUXfaTDGfUTHW6HlxSuLuGW+O7uD/xB6GxNsRvAq8j1JozstQnbhWEtY0hiurva5g=="/></form>
+</td>
+</tr>
+</tbody>
+</table>
+<div class="text-center">
+<div class="btn-group">
+<a class="btn btn-primary" href="https://gitlab.doc.ic.ac.uk/lab2223_summer/cfinaltest_abc123" style="font-size: 12px;">View this repository on Gitlab</a>
+</div>
+</div>
+<table class="table table-bordered table-condensed" style="width: 80%; left: 10%; position: relative;">
+<tbody>
+<tr>
+<td> Clone this repository via ssh: </td>
+<td> git clone git@gitlab.doc.ic.ac.uk:lab2223_summer/cfinaltest_abc123.git</td>
+</tr>
+<tr>
+<td> Clone this repository via https: </td>
+<td> git clone https://gitlab.doc.ic.ac.uk/lab2223_summer/cfinaltest_abc123.git</td>
+</tr>
+</tbody>
+</table>
+<div>
+  Most of the time, this table should mirror the master branch of your repo as shown on gitlab. However, occasionally we may miss a commit if the server is updated or goes down at exactly the wrong moment.
+
+  If a commit takes more than a minute to appear on this page, then please:
+  <form action="https://teaching.doc.ic.ac.uk/labts/lab_exercises/2223/exercises/714/repository/97427" class="button_to" data-remote="true" method="post" style="display:inline-block;"><input class="btn btn-primary" style="font-size: 12px;" type="submit" value="click here to refresh manually."/><input name="authenticity_token" type="hidden" value="9CixbZUYOK6hMfy8nwUUdKV33g2QkCyqWpRXt4wiOawl+HqTO2C+YI9Aqs5RsxFEJuxPHFpSXNhqmZhCIjfNqw=="/></form>
+</div>
+</div>
+</body>
+</html>

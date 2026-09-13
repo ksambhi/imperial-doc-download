@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en" ng-app="app">
+<head>
+<title>LabTS</title>
+<meta name="csrf-param" content="authenticity_token" />
+<meta name="csrf-token" content="REDACTED" />
+</head>
+<body>
+<div class="container">
+<form accept-charset="UTF-8" action="/labts/users/sign_in" class="new_user" id="new_user" method="post"><input name="utf8" type="hidden" value="✓"/><input name="authenticity_token" type="hidden" value="1eOK8sRCl9qEHwu05CSN/iADvcojtx9V9DiWcVQc4uLoqId4sYbMCy5lTREfOn8Q4vnakpEK5tU+WP+WWEy1Sg=="/>
+<div><label for="user_username">Username</label>
+<input autofocus="autofocus" id="user_uid" name="user[uid]" type="text"/></div>
+<div><label for="user_password">Password</label>
+<input autocomplete="off" id="user_password" name="user[password]" type="password"/></div>
+<div style="text-align: right; right:44%; position:relative">
+<input name="user[remember_me]" type="hidden" value="0"/><input id="user_remember_me" name="user[remember_me]" style="left : 0%;" type="checkbox" value="1"/> <label for="user_remember_me" style="text-align: left;">Remember me</label>
+<br/>
+<input name="commit" type="submit" value="Sign in"/>
+</div>
+</form>
+</div>
+</body>
+</html>
