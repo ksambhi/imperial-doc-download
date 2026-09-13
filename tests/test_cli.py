@@ -27,7 +27,9 @@ def test_run_dry_run_creates_output_dir(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert output_dir.is_dir()
-    assert "No pipeline steps registered yet" in result.stdout
+    # --dry-run must never touch the network: the runner skips every step
+    # rather than calling its run(), so only the "would run" log line shows.
+    assert "would run step: labts-fetch" in result.output
 
 
 def test_run_writes_a_log_file(tmp_path: Path) -> None:

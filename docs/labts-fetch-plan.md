@@ -246,9 +246,7 @@ makes re-runs during development instant and is the single biggest quality-of-li
   exercises, and `null` for the 2 multi-milestone ones (pintos, WACC).
 
   ```python
-  submitted_revision = (
-      milestones[0].submitted_revision if len(milestones) == 1 else None
-  )
+  submitted_revision = milestones[0].submitted_revision if len(milestones) == 1 else None
   ```
 
 - **`has_submission` (bool)** = `any(m.submitted_revision for m in milestones)`. Lets

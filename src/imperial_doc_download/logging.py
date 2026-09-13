@@ -96,4 +96,9 @@ def setup_logging(verbose: bool = False, log_dir: Path | str = "logs") -> Path:
     file_handler.setFormatter(logging.Formatter(_FILE_LOG_FORMAT, datefmt="%Y-%m-%d %H:%M:%S"))
     root.addHandler(file_handler)
 
+    # httpx logs every request at INFO, which duplicates the request logging
+    # our own clients already do. Keep it for -v, silence it otherwise.
+    if not verbose:
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+
     return log_file

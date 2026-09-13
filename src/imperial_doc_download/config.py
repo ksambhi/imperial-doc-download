@@ -22,6 +22,7 @@ class Settings:
     """
 
     username: str | None = field(default_factory=lambda: os.environ.get("IMPERIAL_USERNAME"))
+    password: str | None = field(default_factory=lambda: os.environ.get("IMPERIAL_PASSWORD"))
 
     @classmethod
     def from_env(cls) -> Settings:

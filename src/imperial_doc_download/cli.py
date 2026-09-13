@@ -9,6 +9,7 @@ import typer
 
 from imperial_doc_download import __version__
 from imperial_doc_download.config import Settings
+from imperial_doc_download.labts_fetch import LabtsFetchStep
 from imperial_doc_download.logging import setup_logging
 from imperial_doc_download.pipeline import Pipeline, PipelineContext
 
@@ -60,16 +61,9 @@ def run(
     ctx = PipelineContext(output_dir=output_dir, settings=settings, dry_run=dry_run)
     ctx.output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Steps get registered here as each `*_fetch` module is implemented,
-    # e.g. imperial_doc_download.labts_fetch.LabtsFetchStep().
-    pipeline = Pipeline(steps=[])
-
-    if not pipeline.steps:
-        typer.secho(
-            "No pipeline steps registered yet — this is just the scaffold!",
-            fg=typer.colors.YELLOW,
-        )
-
+    # More steps get registered here as each `*_fetch` module is implemented,
+    # e.g. imperial_doc_download.gitlab_fetch.GitlabFetchStep().
+    pipeline = Pipeline(steps=[LabtsFetchStep()])
     pipeline.run(ctx)
 
 
