@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import typer
@@ -36,7 +37,8 @@ def main(
     ),
 ) -> None:
     """imperial-doc-download: grab your data before your account gets nuked."""
-    setup_logging(verbose=verbose)
+    log_file = setup_logging(verbose=verbose)
+    logging.getLogger(__name__).debug("Logging to %s", log_file)
 
 
 @app.command()
@@ -58,8 +60,8 @@ def run(
     ctx = PipelineContext(output_dir=output_dir, settings=settings, dry_run=dry_run)
     ctx.output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Steps get registered here as each Imperial system is implemented in
-    # imperial_doc_download.sources.
+    # Steps get registered here as each `*_fetch` module is implemented,
+    # e.g. imperial_doc_download.labts_fetch.LabtsFetchStep().
     pipeline = Pipeline(steps=[])
 
     if not pipeline.steps:

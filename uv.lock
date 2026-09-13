@@ -25,6 +25,7 @@ name = "imperial-doc-download"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "rich" },
     { name = "typer" },
 ]
 
@@ -35,7 +36,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "typer", specifier = ">=0.15" }]
+requires-dist = [
+    { name = "rich", specifier = ">=13.7" },
+    { name = "typer", specifier = ">=0.15" },
+]
 
 [package.metadata.requires-dev]
 dev = [
