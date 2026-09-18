@@ -207,7 +207,7 @@ Unassessed means *contributes nothing to the module result*. The field is
 
 ```python
 def category(exercise):
-    if not exercise.weight:                     # not "if exercise.mark is None"
+    if not exercise.weight:  # not "if exercise.mark is None"
         return "unassessed-with-submission" if exercise.submissions else "unassessed-no-submission"
     return "group" if exercise.requires_group else "individual"
 ```
