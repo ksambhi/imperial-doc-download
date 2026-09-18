@@ -189,7 +189,8 @@ As asked — zip saved and extracted in the same place:
 
 ```
 <output_dir>/<year>/<module_code>/materials/
-├── <module_code>_materials.zip      as downloaded (filename from the header)
+├── .materials.json                  what was extracted, and from which zip
+├── <module_code>_materials.zip      only with --keep-zip (§7.1)
 └── <extracted tree>                 see §7.2
 ```
 
@@ -197,13 +198,16 @@ This sits beside the existing `<year>/<module_code>/emarking/`, so a
 module's coursework and its teaching materials end up together — which is
 the arrangement that makes the output directory readable.
 
-### 7.1 Keep the zip, with an escape hatch
+### 7.1 ✅ Decided: the zip is deleted once it has extracted cleanly
 
-Keeping both doubles the footprint to ~3.5 GB. The zip is the faithful
-artefact and the extraction is the convenient one, so the default keeps
-both, with `--no-keep-zip` to delete each zip once it has extracted
-cleanly. Worth having: 1.75 GB is a lot to carry twice for something
-that's already been unpacked.
+Keeping both would double the footprint to ~3.5 GB, and the extracted
+tree is the useful half. So the default is **delete after a verified
+extraction**, with `--keep-zip` to retain them.
+
+"Verified" is load-bearing: the zip is only removed after the extraction
+has completed and been moved into place (§6.5). A failed or partial
+extraction keeps its zip, so the next run can retry without
+re-downloading.
 
 ### 7.2 The redundant top-level directory
 
@@ -228,17 +232,17 @@ Re-running must not re-download 1.75 GB. There is **no `ETag` and no
 `content-type`, `content-length`, `content-disposition`, `x-served-by` —
 so the test is:
 
-- a manifest entry recording the zip's `Content-Length` and the extracted
-  file count, plus
-- the zip still on disk at that exact size (or, with `--no-keep-zip`, the
-  extracted marker file below).
+a **`.materials.json` marker** written inside each `materials/`
+directory, recording the zip's `Content-Length`, its name, and what the
+extraction produced (member count, total bytes). Since the zip is deleted
+by default (§7.1), the marker — not the zip — is what makes "already
+have this" answerable.
 
-Matching → skip, no request. `--force` redownloads.
-
-A **`.materials.json` marker** written inside each `materials/` directory
-records what the extraction produced (member count, total bytes, the zip
-it came from). That makes "already extracted" answerable without
-re-reading the zip, and survives `--no-keep-zip`.
+Marker present and its recorded size matches the `Content-Length` the
+server now reports → skip. But checking that costs a request, so the
+default is **marker present → skip without asking at all**, with
+`--recheck` to spend 46 cheap header requests confirming nothing has
+changed upstream. `--force` redownloads regardless.
 
 A `404` is terminal and expected (4 modules ✅) — recorded as `absent`,
 never retried, exactly as `emarking_fetch` treats a missing artefact.
@@ -307,18 +311,21 @@ And for the step:
   test `emarking_fetch` already has, since the write routes here are just
   as real)
 
-## 11. Open questions
+## 11. Decisions ✅
 
-1. **`--no-keep-zip` as the default?** 3.5 GB versus 1.75 GB. I've
-   defaulted to keeping both (§7.1) since the zip is the faithful
-   artefact, but for a backup that's about to be carried around, deleting
-   after a verified extraction is defensible.
-2. **Past papers.** The same API serves `GET /past-papers` and
-   `GET /past-papers/{id}/file` ✅, which this plan doesn't touch. Worth a
-   follow-up pipeline?
-3. **`/{year}/public-resources`** ✅ also exists — resources published
-   without login. Probably a subset of what we already get per module,
-   but could be checked if you want belt-and-braces coverage.
-4. **Concurrency default.** 1.75 GB at 1.37 MB/s is 21 minutes
-   sequential. Default to 1 like the others and let `-j` opt in, or
-   default higher for this one because the payload is so much larger?
+1. **The zip is deleted after a clean extraction** — §7.1. `--keep-zip`
+   retains it.
+2. **Past papers are out of scope.** `GET /past-papers` and
+   `/past-papers/{id}/file` exist ✅ and are left alone.
+3. **`/{year}/public-resources` is out of scope** ✅ — very likely a
+   subset of what the per-module zips already contain.
+4. **`--concurrency` now defaults to `os.cpu_count()` everywhere**, not
+   just here — the clones and the eMarking downloads too. The `1` they
+   defaulted to was a development convenience.
+
+   ⚠️ Note that the per-request delay still applies *inside* the
+   semaphore, so on a 20-core machine eMarking and materials can issue up
+   to ~20 requests in flight. That is a long way from the
+   "one-at-a-time" wording in `emarking-fetch-plan.md` §1, which exists
+   because these are shared teaching servers. The delay is what keeps it
+   civil; lower `-j` or raise `--delay` on anything that looks strained.

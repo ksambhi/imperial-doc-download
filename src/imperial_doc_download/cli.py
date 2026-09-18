@@ -14,6 +14,7 @@ and reports what failed at the end.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 import typer
@@ -89,12 +90,24 @@ _JUMP_HOST_OPTION = typer.Option(
         "Defaults to one of shell1-5.doc.ic.ac.uk, picked at random per run."
     ),
 )
+#: Everything here is I/O-bound — clones waiting on a remote, downloads
+#: waiting on a socket — so the core count isn't a hard ceiling so much as
+#: a familiar, machine-appropriate number to fan out to. Note that the
+#: HTTP pipelines still sleep `--delay` after each request *inside* the
+#: semaphore, so this raises the request rate rather than removing the
+#: throttle: on a many-core machine, consider lowering `-j` or raising
+#: `--delay` against a teaching server that looks strained.
+DEFAULT_CONCURRENCY = os.cpu_count() or 1
+
 _CONCURRENCY_OPTION = typer.Option(
-    1,
+    DEFAULT_CONCURRENCY,
     "--concurrency",
     "-j",
     min=1,
-    help="How many repositories to clone at once. 1 (the default) is sequential.",
+    help=(
+        "How many clones/downloads to run at once. Defaults to this "
+        "machine's CPU count; pass 1 for strictly sequential."
+    ),
 )
 _CLONE_TIMEOUT_OPTION = typer.Option(
     DEFAULT_CLONE_TIMEOUT,
