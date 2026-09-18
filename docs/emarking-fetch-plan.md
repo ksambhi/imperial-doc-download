@@ -4,8 +4,9 @@ Download every coursework submission, spec, model answer, supplementary
 file and feedback file from DoC's eMarking system.
 
 Status: **plan only, nothing implemented.** Everything marked ✅ was
-verified against the live API; everything marked ❓ needs a working
-password before it can be checked (see §8).
+verified against the live API — including all of §9, which is now
+answered. Four of those answers changed the design; where they did, the
+section above says so and §9 has the evidence.
 
 ## 1. Safety rules (non-negotiable)
 
@@ -111,7 +112,10 @@ Two consequences worth designing around:
 
 - **The `spec`/`model_answer`/`supplementary_file` fields say up front
   whether the artefact exists**, so we never fire a request that we
-  already know will 404. Same for `feedback` being null.
+  already know will 404. Same for `feedback` being null. (They are
+  timestamps, not paths — non-null is the whole signal.) **Caveat:
+  "exists" is not "we may have it" — every `model_answer` is a 403, see
+  §9.3.**
 - **A submission is either a file or a git commit.** `file_path` and
   `gitlab_hash` are both nullable; a LabTS-backed exercise records a
   commit hash and has no file to download. Those get metadata only —
@@ -208,11 +212,16 @@ Naming rules:
   length-capped, and a non-empty fallback if a title normalises to
   nothing. Worth doing properly — titles are free text written by
   lecturers.
-- Downloaded filenames come from `Content-Disposition`. Failing that:
+- Downloaded filenames come from `Content-Disposition` (§9.1) — except
+  for submissions, where `target_submission_file_name` is preferred
+  because the header's name carries an opaque uuid prefix. Failing both:
   the fixed stem (`model-answer`, `supplementary`, `feedback`) plus an
   extension guessed by running `file --extension`; failing *that*,
   `.bin`. A filename from the header is still sanitised — it is remote
   input and must never escape its directory (`../` and absolute paths).
+- The per-feedback directory is load-bearing: every feedback file is
+  served as `<username>.pdf`, so 69 of them would otherwise collide
+  (§9.1).
 
 ## 5. Caching, and what a re-run does
 
@@ -221,16 +230,19 @@ Same contract as the other pipelines: re-running is cheap and safe, and
 
 - `exercises.json` is reused when present unless `--force`, so a re-run
   costs zero requests per year.
-- A file already on disk is not re-downloaded. `file_size` is in the
-  metadata for submissions ✅, so a truncated file can be spotted rather
-  than trusted; for the others there is no declared size, so presence is
-  the test.
-- Downloads are written to a temp file and renamed into place, so an
-  interrupted run never leaves a half-file that a later run would trust.
-- A per-year manifest (`emarking-files.json`) records what was fetched,
-  what was skipped and why (no spec, submission is a commit hash, 404,
-  …), so "nothing was downloaded for this exercise" is always
-  distinguishable from "nothing exists".
+- A file already on disk is not re-downloaded. Truncation is caught
+  against the response's `Content-Length` as it streams, **not** against
+  the metadata `file_size`, which lies (§9.6).
+- Downloads are streamed to a temp file and renamed into place, so an
+  interrupted run never leaves a half-file that a later run would trust,
+  and a 48 MB artefact never sits in memory (§9.6).
+- A manifest (`emarking-files.json`) records what was fetched, what was
+  skipped and why (no spec, submission is a commit hash, 404, 403, …),
+  so "nothing was downloaded for this exercise" is always
+  distinguishable from "nothing exists". Terminal outcomes — `403`,
+  `absent` — are **not retried** on a re-run without `--force`; that is
+  what stops every run spending 45 requests collecting the same refusals
+  (§9.3).
 
 ## 6. Concurrency
 
@@ -280,24 +292,138 @@ the variables in the shell that launches the tool and let the tool read
 should also be handed to subprocesses via stdin or an env dict, never
 in argv, where they show up in `ps`.
 
-## 9. Open questions (❓ — still unverified)
+## 9. Open questions — all answered ✅
 
-Auth, the proxy and the shape of the exercise list are all confirmed
-against the live API. These remain, and should be checked against real
-responses before the code is trusted:
+Probed against the live API on 2026-09-18, GET-only, personal endpoints
+only. Four of the six answers change what the code has to do, so they are
+written up rather than just ticked.
 
-1. Does `Content-Disposition` actually come back on each of the five
-   download endpoints, and in what form (`filename=` vs `filename*=`)?
-2. Does a commit-hash submission's `/file` endpoint 404, or return
-   something (a text file containing the hash, say)?
-3. What does the API do when an artefact the metadata promised is
-   missing — 404, 500, or an empty body?
-4. Are there response headers hinting at rate limits once authenticated?
-   (None are documented ✅, and none were seen on the requests made.)
-5. Which years does this account actually have exercises for? LabTS says
-   2223-2526; `/years` offers 25 years back to 0203, and asking for all
-   of them is 25 cheap requests — but confirm empty years respond
-   sensibly rather than erroring.
-6. How big can a single submission file be, and does anything need
-   streaming to disk rather than buffering? (`file_size` is in the
-   metadata ✅, so this is answerable before downloading.)
+### 9.1 `Content-Disposition` ✅ always present, always the simple form
+
+All five endpoints return it, on every response observed, as
+
+```
+Content-Disposition: inline; filename="40001_1_spec.pdf"
+```
+
+`inline`, never `attachment`; `filename=` with a quoted value, **never
+`filename*=`**. A real `Content-Type` comes back too
+(`application/pdf`, `text/csv; charset=utf-8`, `application/zip`), which
+the openapi schema didn't promise. So the parser must accept `inline` as
+well as `attachment`, and the `file --extension` fallback in §4 is a
+belt-and-braces path that in practice never fires.
+
+Three filename shapes, and two of them are traps:
+
+| Endpoint | Example | Note |
+|---|---|---|
+| spec / supplementary | `40001_2_supplementary.csv` | unique per exercise |
+| submission file | `973f26563a484ef0a875f75faa8c67b0_cw1.pdf` | opaque uuid prefix — **prefer `target_submission_file_name`** (`cw1.pdf`) and keep the header name only as a fallback |
+| feedback file | `kss22.pdf` | **it is the username, identical for every feedback file in every module** — so the per-feedback directory in §4 isn't tidiness, it's the only thing preventing 69 files from overwriting each other |
+
+### 9.2 A commit-hash submission's `/file` → **500**, not 404 ✅
+
+```
+GET .../submissions/8483/file  →  500 Internal Server Error
+```
+
+Not a 404, and not a text file containing the hash. So this is not a
+case to handle — it is a case to **never request**: `file_path is None`
+means skip, record `skipped: submission is a git commit`, and let
+`gitlab_fetch` be the thing that has the code. Requesting it anyway
+would mean deliberately causing 52 server errors on a shared teaching
+box per run.
+
+### 9.3 Missing/forbidden artefacts ✅ — and model answers are never ours
+
+A clean, distinguishable set of responses:
+
+| Case | Response |
+|---|---|
+| artefact genuinely absent | `404 {"detail":"File not found."}` |
+| exercise number doesn't exist | `404 {"detail":"Exercise not found."}` |
+| no credentials | `401` |
+| **model answer** | `403 {"detail":"You are not allowed to access this resource."}` |
+
+**Every single model answer is 403.** All 45 exercises whose metadata
+carries a non-null `model_answer` were probed and all 45 were refused,
+including the 25 whose `model_answer_visible_on` is a date years in the
+past. So `model_answer: <timestamp>` means *"a marker uploaded one"*,
+not *"you may have it"* — and §3.2's "non-null means we never fire a
+request that we already know will 404" does not hold for this field.
+
+Consequences:
+
+- 403 is a **terminal, expected outcome**, not an error and not
+  retryable. It gets recorded in the manifest as `forbidden` and
+  reported as a count, not as 45 warnings.
+- A recorded terminal outcome is **not retried on the next run** unless
+  `--force`. Otherwise every re-run spends 45 requests being told no.
+
+### 9.4 Rate limits ✅ none, in the documentation or the headers
+
+No `Retry-After`, no `X-RateLimit-*`, no `RateLimit-*` on any response,
+authenticated or not. The full header set is
+`server: openresty`, `date`, `content-type`, `content-length`,
+`connection`, `x-frame-options: DENY`, `x-served-by`. Nothing throttles
+us, which is exactly why §1's sequential-with-a-delay default stays.
+
+### 9.5 Years ✅ 2223–2526, and the other 21 fail rather than come back empty
+
+`/years` advertises 25 years; only four have anything. An unused year
+does **not** return `[]`:
+
+| Years | Response |
+|---|---|
+| 0203–1617 (15 years) | `500 Internal Server Error` |
+| 1718–2122, 2627 (6 years) | `502 {"detail":"ABC API call returned a 404: Student not found."}` |
+| **2223, 2324, 2425, 2526** | `200` |
+
+So "this year has nothing for me" is indistinguishable from "the server
+broke" by status code alone, and a year that errors **must not fail the
+run** — it is the normal case for 21 years out of 25. Log it at debug,
+record it in the manifest, move on. (Matches LabTS, which shows
+2223–2526 for this account.)
+
+Per-year totals, after §3.3's keep-rule:
+
+| Year | exercises returned | ours |
+|---|---|---|
+| 2223 | 471 | 66 |
+| 2324 | 473 | 44 |
+| 2425 | 438 | 16 |
+| 2526 | 500 | 20 |
+| | | **146** |
+
+### 9.6 Sizes ✅ stream everything, and don't trust `file_size`
+
+| | |
+|---|---|
+| submissions with a file | 106 (of 158; the other 52 are commit hashes) |
+| submission bytes total | **178.7 MB** |
+| largest submission | 13.2 MB |
+| largest artefact of any kind | **47.9 MB** (a supplementary zip) |
+| specs / supplementary / feedback | 110 / 9 / 69 |
+
+Two things follow:
+
+- 48 MB in one response is enough to stream to disk rather than buffer,
+  so downloads use `client.stream()` and write as they go. There is no
+  declared size for spec/supplementary/feedback, so this isn't optional.
+- **`file_size` is unreliable.** Six submissions report `file_size: 0`
+  and then serve real content — one reports `0` and returns 39,167
+  bytes. So §5's "a truncated file can be spotted" must use the
+  response's `Content-Length`, which was correct on every response
+  observed, and treat the metadata `file_size` as a hint only.
+
+### 9.7 Not a question, but worth flagging 🔒
+
+Group submissions (§3.3) carry the uploader's username, and 10 distinct
+teammate usernames appear across our 158 submissions. `mark.marker`,
+`marks_published_by` and `locked_by` likewise name staff. These are
+embedded in the API response, and the submission id is needed to
+download our own group's work, so the metadata is kept — but it does
+mean `exercises.json` contains other people's logins, and the output
+directory is not something to share casually. See `labts-fetch-plan.md`
+§2.5 for the same concern handled the other way (that data was
+droppable; this isn't).
