@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,13 @@ def _isolate_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # from a scratch directory so we don't litter the repo with log files.
     monkeypatch.chdir(tmp_path)
 
+    # Typer reads credentials and key paths straight from the environment,
+    # so whatever the developer running the tests has exported must not
+    # leak in and change what these assert.
+    for name, _ in list(os.environ.items()):
+        if name.startswith("IMPERIAL_"):
+            monkeypatch.delenv(name)
+
 
 def test_version() -> None:
     result = runner.invoke(app, ["--version"])
@@ -23,7 +31,11 @@ def test_version() -> None:
 
 @pytest.mark.parametrize(
     ("command", "step_name"),
-    [("labts", "labts-fetch"), ("scientia", "scientia-fetch")],
+    [
+        ("labts", "labts-fetch"),
+        ("gitlab", "gitlab-fetch"),
+        ("scientia", "scientia-fetch"),
+    ],
 )
 def test_each_pipeline_is_its_own_subcommand(tmp_path: Path, command: str, step_name: str) -> None:
     output_dir = tmp_path / "data"
@@ -34,6 +46,45 @@ def test_each_pipeline_is_its_own_subcommand(tmp_path: Path, command: str, step_
     # --dry-run must never touch the network: the runner skips every step
     # rather than calling its run(), so only the "would run" log line shows.
     assert f"would run step: {step_name}" in result.output
+
+
+def test_labts_fetches_the_list_and_then_clones(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["labts", "--dry-run", "--output-dir", str(tmp_path / "data")])
+
+    assert result.exit_code == 0
+    fetch = result.output.index("would run step: labts-fetch")
+    clone = result.output.index("would run step: gitlab-fetch")
+    assert fetch < clone, "the clone step must run after the list it clones from"
+
+
+def test_the_clone_options_are_on_both_clone_commands() -> None:
+    for command in ("labts", "gitlab"):
+        output = runner.invoke(app, [command, "--help"]).output
+        for option in ("--force", "--concurrency", "--clone-timeout", "--gitlab-ssh-key"):
+            assert option in output, f"{option} missing from `{command} --help`"
+
+
+def test_ssh_settings_can_come_from_the_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("IMPERIAL_GITLAB_SSH_KEY", "/keys/gitlab")
+    output_dir = tmp_path / "data"
+    output_dir.mkdir()
+
+    result = runner.invoke(app, ["gitlab", "--output-dir", str(output_dir)])
+
+    # Got past the "no key configured" check, and stopped at the next
+    # thing that's missing — which proves the env var was picked up.
+    assert result.exit_code == 1
+    assert "Run the labts step first" in result.output
+
+
+def test_a_missing_ssh_key_is_reported_cleanly(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["gitlab", "--output-dir", str(tmp_path / "data")])
+
+    assert result.exit_code == 1
+    assert "IMPERIAL_GITLAB_SSH_KEY" in result.output
+    assert "Traceback" not in result.output
 
 
 def test_subcommands_are_listed_in_help() -> None:
