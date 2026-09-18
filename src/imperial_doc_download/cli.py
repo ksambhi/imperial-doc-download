@@ -26,6 +26,7 @@ from imperial_doc_download.gitlab_fetch import GitlabFetchStep
 from imperial_doc_download.gitlab_fetch.cloning import DEFAULT_CLONE_TIMEOUT
 from imperial_doc_download.labts_fetch import LabtsFetchStep
 from imperial_doc_download.logging import setup_logging
+from imperial_doc_download.materials_fetch import MaterialsFetchStep
 from imperial_doc_download.pipeline import Pipeline, PipelineContext, Step
 from imperial_doc_download.pipeline.runner import StepFailed
 from imperial_doc_download.scientia_fetch import ScientiaFetchStep
@@ -154,6 +155,38 @@ _EMARKING_MODEL_ANSWERS_OPTION = typer.Option(
 )
 
 
+_KEEP_ZIP_OPTION = typer.Option(
+    False,
+    "--keep-zip",
+    help=(
+        "Keep each module's materials zip after extracting it. Off by "
+        "default — the full set is ~1.75 GB, and keeping both halves "
+        "doubles that."
+    ),
+)
+
+# One switch per pipeline for the `all` command. Materials is the odd one
+# out and defaults to skipped: it's ~1.75 GB, an order of magnitude more
+# than everything else combined, so opting in should be deliberate.
+_SKIP_LABTS_OPTION = typer.Option(
+    False, "--skip-labts", help="Don't fetch the LabTS repository list."
+)
+_SKIP_GITLAB_OPTION = typer.Option(
+    False, "--skip-gitlab", help="Don't clone the GitLab repositories."
+)
+_SKIP_EMARKING_OPTION = typer.Option(
+    False, "--skip-emarking", help="Don't fetch eMarking coursework or the marks record."
+)
+_SKIP_MATERIALS_OPTION = typer.Option(
+    True,
+    "--skip-materials/--materials",
+    help=(
+        "Teaching materials are ~1.75 GB, so they're skipped unless you "
+        "ask for them with --materials."
+    ),
+)
+
+
 def _version_callback(value: bool) -> None:
     if value:
         typer.echo(f"imperial-doc-download {__version__}")
@@ -249,35 +282,48 @@ def download_all(
     clone_timeout: float = _CLONE_TIMEOUT_OPTION,
     delay: float = _EMARKING_DELAY_OPTION,
     model_answers: bool = _EMARKING_MODEL_ANSWERS_OPTION,
+    keep_zip: bool = _KEEP_ZIP_OPTION,
+    skip_labts: bool = _SKIP_LABTS_OPTION,
+    skip_gitlab: bool = _SKIP_GITLAB_OPTION,
+    skip_emarking: bool = _SKIP_EMARKING_OPTION,
+    skip_materials: bool = _SKIP_MATERIALS_OPTION,
 ) -> None:
-    """Download everything: LabTS, the GitLab repositories, and eMarking.
+    """Download everything: LabTS, GitLab, eMarking and (opt-in) materials.
 
-    Runs all four implemented steps against one shared context, in the
-    order they depend on each other:
+    Runs every pipeline against one shared context, in the order they
+    depend on each other:
 
     \b
-      1. labts-fetch     the repository list             → labts-list.json
-      2. gitlab-fetch    clone every repository          → <year>/gitlab/
-      3. emarking-fetch  specs, submissions, feedback    → <year>/<module>/emarking/
-      4. emarking-marks  the marks record and web page   → emarking-results.html
+      1. labts-fetch      the repository list            → labts-list.json
+      2. gitlab-fetch     clone every repository         → <year>/gitlab/
+      3. emarking-fetch   specs, submissions, feedback   → <year>/<module>/emarking/
+      4. emarking-marks   the marks record and web page  → emarking-results.html
+      5. materials-fetch  lecture notes and handouts     → <year>/<module>/materials/
+
+    **Materials are skipped unless you pass `--materials`** — that step
+    alone is ~1.75 GB, an order of magnitude more than everything else
+    put together. Any other pipeline can be left out with its own
+    `--skip-…` flag.
 
     A failing step doesn't stop the rest — LabTS being down is no reason
     to lose the eMarking half — and what failed is listed at the end.
     Re-running retries only what's missing, so it's safe to just run it
     again.
 
-    `-j/--concurrency` applies to both the clones and the eMarking
-    downloads. Be modest with it: the clones go through a shared shell
-    server and eMarking is a shared teaching server.
+    `-j/--concurrency` applies to the clones and to both sets of
+    downloads, and defaults to this machine's CPU count.
 
     Needs IMPERIAL_USERNAME and IMPERIAL_PASSWORD, plus
     IMPERIAL_GITLAB_SSH_KEY and IMPERIAL_DOC_SSH_KEY. A `.env` in the
     working directory is read automatically.
     """
-    _run_pipeline(
-        [
-            LabtsFetchStep(cache_dir=cache_dir, force=force),
-            _gitlab_step(force, concurrency, clone_timeout, jump_host),
+    steps: list[Step] = []
+    if not skip_labts:
+        steps.append(LabtsFetchStep(cache_dir=cache_dir, force=force))
+    if not skip_gitlab:
+        steps.append(_gitlab_step(force, concurrency, clone_timeout, jump_host))
+    if not skip_emarking:
+        steps += [
             EmarkingFetchStep(
                 force=force,
                 delay=delay,
@@ -286,7 +332,16 @@ def download_all(
                 model_answers=model_answers,
             ),
             EmarkingMarksStep(force=force, jump_host=jump_host),
-        ],
+        ]
+    if not skip_materials:
+        steps.append(_materials_step(force, delay, concurrency, jump_host, None, keep_zip))
+
+    if not steps:
+        typer.secho("Every pipeline was skipped — nothing to do.", fg=typer.colors.YELLOW)
+        raise typer.Exit()
+
+    _run_pipeline(
+        steps,
         output_dir,
         dry_run,
         _settings(username, doc_ssh_key, gitlab_ssh_key),
@@ -433,6 +488,66 @@ def emarking(
         output_dir,
         dry_run,
         _settings(username, doc_ssh_key, None),
+    )
+
+
+@app.command()
+def materials(
+    output_dir: Path = _OUTPUT_DIR_OPTION,
+    dry_run: bool = _DRY_RUN_OPTION,
+    force: bool = _FORCE_OPTION,
+    username: str | None = _USERNAME_OPTION,
+    doc_ssh_key: Path | None = _DOC_SSH_KEY_OPTION,
+    jump_host: str | None = _JUMP_HOST_OPTION,
+    concurrency: int = _CONCURRENCY_OPTION,
+    delay: float = _EMARKING_DELAY_OPTION,
+    years: list[str] | None = _EMARKING_YEAR_OPTION,
+    keep_zip: bool = _KEEP_ZIP_OPTION,
+) -> None:
+    """Download and extract teaching materials for every enrolled module.
+
+    One zip per module, extracted into
+    `<output-dir>/<year>/<module-code>/materials/` and then deleted
+    (`--keep-zip` retains it). About 1.75 GB in total.
+
+    Scope is the enrolment list, which `emarking` caches — so run that
+    first, or pass `--year`, or this has no modules to work from.
+
+    Re-running costs nothing for modules already extracted: a
+    `.materials.json` marker in each directory records what was done.
+
+    Read-only by construction — this client only ever issues GET.
+
+    Needs IMPERIAL_USERNAME, IMPERIAL_PASSWORD, and IMPERIAL_DOC_SSH_KEY
+    for the SSH SOCKS proxy.
+    """
+    _run_pipeline(
+        [
+            _materials_step(
+                force, delay, concurrency, jump_host, list(years) if years else None, keep_zip
+            )
+        ],
+        output_dir,
+        dry_run,
+        _settings(username, doc_ssh_key, None),
+    )
+
+
+def _materials_step(
+    force: bool,
+    delay: float,
+    concurrency: int,
+    jump_host: str | None,
+    years: list[str] | None,
+    keep_zip: bool,
+) -> MaterialsFetchStep:
+    return MaterialsFetchStep(
+        force=force,
+        delay=delay,
+        concurrency=concurrency,
+        jump_host=jump_host,
+        years=years,
+        keep_zip=keep_zip,
     )
 
 

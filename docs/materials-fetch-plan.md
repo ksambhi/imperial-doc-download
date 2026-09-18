@@ -3,9 +3,21 @@
 Download every teaching resource — lecture notes, slides, handouts — for
 every module enrolled in, as one zip per module, extracted in place.
 
-Status: **plan only, nothing implemented.** Everything marked ✅ was
-verified against the live API on 2026-09-18. Inherits the safety rules of
-`emarking-fetch-plan.md` §1, which apply here for the same reasons.
+Status: **implemented**, in `src/imperial_doc_download/materials_fetch/`.
+Everything marked ✅ was verified against the live API on 2026-09-18.
+Inherits the safety rules of `emarking-fetch-plan.md` §1, which apply
+here for the same reasons.
+
+Two notes from building it:
+
+- **It is opt-in inside `all`.** At ~1.75 GB this step is an order of
+  magnitude larger than every other pipeline combined, so `all` skips it
+  unless `--materials` is passed. Every other pipeline has a
+  `--skip-…` flag of its own.
+- **A `404` is not cached.** Unlike eMarking's settled 403s and 404s, a
+  module with no materials today may publish them next term, and
+  re-asking costs 4 cheap requests. Only successfully extracted modules
+  get a marker and are skipped.
 
 ## 1. Safety rules — this API writes too
 

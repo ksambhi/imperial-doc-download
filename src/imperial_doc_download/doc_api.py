@@ -200,6 +200,7 @@ class DocApiClient:
         path: str,
         directory: Path,
         *,
+        params: dict[str, str] | None = None,
         preferred_name: str | None = None,
         fallback_stem: str = "download",
     ) -> Download:
@@ -222,7 +223,9 @@ class DocApiClient:
         async with self._semaphore:
             self.request_count += 1
             logger.info("GET %s", path)
-            response = await self._stream_with_retry(url, directory, preferred_name, fallback_stem)
+            response = await self._stream_with_retry(
+                url, directory, preferred_name, fallback_stem, params
+            )
             await self._sleep()
             return response
 
@@ -234,6 +237,7 @@ class DocApiClient:
         directory: Path,
         preferred_name: str | None,
         fallback_stem: str,
+        params: dict[str, str] | None = None,
     ) -> Download:
         last_exc: httpx.TransportError | None = None
 
@@ -248,7 +252,9 @@ class DocApiClient:
                 )
                 await asyncio.sleep(backoff)
             try:
-                return await self._stream_once(url, directory, preferred_name, fallback_stem)
+                return await self._stream_once(
+                    url, directory, preferred_name, fallback_stem, params
+                )
             except httpx.TransportError as exc:
                 last_exc = exc
                 logger.warning("GET %s failed: %s", url, type(exc).__name__)
@@ -262,8 +268,9 @@ class DocApiClient:
         directory: Path,
         preferred_name: str | None,
         fallback_stem: str,
+        params: dict[str, str] | None = None,
     ) -> Download:
-        async with self._client.stream("GET", url, auth=self._auth) as response:
+        async with self._client.stream("GET", url, auth=self._auth, params=params) as response:
             terminal = _terminal_status(response)
             if terminal is not None:
                 # The body of a 401 is the one thing never to read or log.

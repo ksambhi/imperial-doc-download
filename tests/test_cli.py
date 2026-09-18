@@ -183,3 +183,66 @@ class TestAllCommand:
             ],
         )
         assert result.exit_code == 0, result.output
+
+
+class TestAllSkipFlags:
+    """Each pipeline can be left out, and materials is out by default."""
+
+    def _steps(self, tmp_path: Path, *flags: str) -> list[str]:
+        result = runner.invoke(app, ["all", "--output-dir", str(tmp_path), "--dry-run", *flags])
+        assert result.exit_code == 0, result.output
+        return re.findall(r"would run step: (\S+)", _output(result))
+
+    def test_materials_is_skipped_by_default(self, tmp_path: Path) -> None:
+        # ~1.75 GB, an order of magnitude more than everything else, so
+        # opting in should be deliberate.
+        assert "materials-fetch" not in self._steps(tmp_path)
+
+    def test_materials_opts_in(self, tmp_path: Path) -> None:
+        assert "materials-fetch" in self._steps(tmp_path, "--materials")
+
+    @pytest.mark.parametrize(
+        ("flag", "gone"),
+        [
+            ("--skip-labts", ["labts-fetch"]),
+            ("--skip-gitlab", ["gitlab-fetch"]),
+            ("--skip-emarking", ["emarking-fetch", "emarking-marks"]),
+        ],
+    )
+    def test_each_pipeline_can_be_skipped(self, tmp_path: Path, flag: str, gone: list[str]) -> None:
+        steps = self._steps(tmp_path, flag)
+        for name in gone:
+            assert name not in steps
+        assert steps, "skipping one pipeline should not empty the run"
+
+    def test_skipping_leaves_the_others_in_order(self, tmp_path: Path) -> None:
+        steps = self._steps(tmp_path, "--skip-labts", "--materials")
+        assert steps == ["gitlab-fetch", "emarking-fetch", "emarking-marks", "materials-fetch"]
+
+    def test_skipping_everything_says_so_rather_than_running_an_empty_pipeline(
+        self, tmp_path: Path
+    ) -> None:
+        result = runner.invoke(
+            app,
+            [
+                "all",
+                "--output-dir",
+                str(tmp_path),
+                "--skip-labts",
+                "--skip-gitlab",
+                "--skip-emarking",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "nothing to do" in _output(result)
+
+
+class TestMaterialsCommand:
+    def test_runs_only_the_materials_step(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["materials", "--output-dir", str(tmp_path), "--dry-run"])
+        assert result.exit_code == 0, result.output
+        assert re.findall(r"would run step: (\S+)", _output(result)) == ["materials-fetch"]
+
+    def test_it_is_listed_in_the_help(self) -> None:
+        result = runner.invoke(app, ["--help"])
+        assert "materials" in _output(result)
