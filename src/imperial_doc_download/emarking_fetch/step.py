@@ -45,8 +45,8 @@ from imperial_doc_download.emarking_fetch.models import (
     for_modules,
 )
 from imperial_doc_download.emarking_fetch.naming import exercise_directory, safe_component
-from imperial_doc_download.emarking_fetch.proxy import SocksProxy
 from imperial_doc_download.pipeline import PipelineContext, Step
+from imperial_doc_download.proxy import SocksProxy
 
 logger = logging.getLogger(__name__)
 

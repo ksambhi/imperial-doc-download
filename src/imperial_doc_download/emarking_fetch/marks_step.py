@@ -32,7 +32,6 @@ from imperial_doc_download.emarking_fetch.models import (
     Module,
     enrolled_modules,
 )
-from imperial_doc_download.emarking_fetch.proxy import SocksProxy
 from imperial_doc_download.emarking_fetch.results_html import (
     feedback_links_from_manifest,
     render_results,
@@ -44,6 +43,7 @@ from imperial_doc_download.emarking_fetch.step import (
     read_year_cache,
 )
 from imperial_doc_download.pipeline import PipelineContext, Step
+from imperial_doc_download.proxy import SocksProxy
 
 logger = logging.getLogger(__name__)
 

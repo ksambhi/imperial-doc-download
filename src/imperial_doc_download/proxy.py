@@ -1,13 +1,15 @@
 """An SSH SOCKS proxy into the DoC network, as a context manager.
 
-`emarking-api.doc.ic.ac.uk` and `abc-api.doc.ic.ac.uk` are both inside the
+`emarking-api`, `materials-api` and `abc-api` are all inside the
 departmental firewall, so every request has to go through a shell server:
 
     ssh -N -D 127.0.0.1:<port> <username>@shell<n>.doc.ic.ac.uk
 
 The ssh setup itself — throwaway config, key unlocking, private agent,
 `BatchMode yes` — is `imperial_doc_download.ssh`'s job (see `SshSession`);
-all this module adds is the `-D` tunnel and its lifecycle.
+all this module adds is the `-D` tunnel and its lifecycle. It lives at
+the top level rather than inside one pipeline because every firewalled
+API needs exactly the same tunnel.
 
 Two details that are worth the code they cost:
 
