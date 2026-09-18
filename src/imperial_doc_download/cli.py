@@ -18,6 +18,7 @@ import typer
 
 from imperial_doc_download import __version__
 from imperial_doc_download.config import Settings
+from imperial_doc_download.emarking_fetch import EmarkingFetchStep
 from imperial_doc_download.gitlab_fetch import GitlabFetchStep
 from imperial_doc_download.gitlab_fetch.cloning import DEFAULT_CLONE_TIMEOUT
 from imperial_doc_download.labts_fetch import LabtsFetchStep
@@ -245,6 +246,68 @@ def _settings(
         username=username,
         doc_ssh_key=str(doc_ssh_key) if doc_ssh_key else None,
         gitlab_ssh_key=str(gitlab_ssh_key) if gitlab_ssh_key else None,
+    )
+
+
+_EMARKING_DELAY_OPTION = typer.Option(
+    1.0,
+    "--delay",
+    min=0.0,
+    help="Seconds to wait after each API request. eMarking is a shared teaching server.",
+)
+_EMARKING_YEAR_OPTION = typer.Option(
+    None,
+    "--year",
+    help=(
+        "Only fetch these academic years (e.g. --year 2324 --year 2425). "
+        "By default every year the API advertises is checked."
+    ),
+)
+
+
+@app.command()
+def emarking(
+    output_dir: Path = _OUTPUT_DIR_OPTION,
+    dry_run: bool = _DRY_RUN_OPTION,
+    force: bool = _FORCE_OPTION,
+    username: str | None = _USERNAME_OPTION,
+    doc_ssh_key: Path | None = _DOC_SSH_KEY_OPTION,
+    jump_host: str | None = _JUMP_HOST_OPTION,
+    concurrency: int = _CONCURRENCY_OPTION,
+    delay: float = _EMARKING_DELAY_OPTION,
+    years: list[str] | None = _EMARKING_YEAR_OPTION,
+) -> None:
+    """Download coursework specs, submissions and feedback from eMarking.
+
+    One request per academic year lists the exercises that are yours,
+    then each spec, submission, supplementary file and feedback file is
+    downloaded into `<output-dir>/<year>/<module-code>/emarking/`, with a
+    record of everything in `emarking-files.json`.
+
+    Re-running is cheap: a file already on disk is left alone, and an
+    answer the API has settled (a missing artefact, or a model answer you
+    aren't allowed) is not asked about again. `--force` redoes everything.
+
+    Read-only by construction — this client only ever issues GET, and
+    only ever to your own data.
+
+    Needs IMPERIAL_USERNAME, IMPERIAL_PASSWORD, and IMPERIAL_DOC_SSH_KEY
+    for the SSH SOCKS proxy that reaches the API through the DoC
+    firewall.
+    """
+    _run_pipeline(
+        [
+            EmarkingFetchStep(
+                force=force,
+                delay=delay,
+                concurrency=concurrency,
+                jump_host=jump_host,
+                years=list(years) if years else None,
+            )
+        ],
+        output_dir,
+        dry_run,
+        _settings(username, doc_ssh_key, None),
     )
 
 
