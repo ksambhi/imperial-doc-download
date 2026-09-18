@@ -4,9 +4,12 @@ Save the personal record — every marked exercise, with its deadline,
 mark, grade and status colour, across every academic year — as one JSON
 file at the root of the output directory.
 
-Status: **plan only, nothing implemented.** Everything marked ✅ was
-verified against the live API on 2026-09-18. Builds on
+Status: **implemented**, in `emarking_fetch/{grading,marks,marks_step}.py`
+plus the scope change in `client.py`/`models.py`/`step.py`. Everything
+marked ✅ was verified against the live API on 2026-09-18. Builds on
 `emarking-fetch-plan.md`, whose §1 safety rules apply unchanged.
+
+One thing the implementation found that this plan had wrong — see §6.2.
 
 This plan also carries the **enrolment-based scope change** to the
 existing download step (`emarking-fetch-plan.md` §3.3.1), because both
@@ -279,6 +282,28 @@ Decisions baked in:
   exactly what you'd want a record to have caught.
 - **A module with no marked exercises is omitted entirely**, rather than
   appearing with an empty list.
+
+### 6.2 ⚠️ `pass_mark` is a percentage, not a mark
+
+Found while eyeballing the first real run: the record said `passed:
+false` for 14/20, which is 70%.
+
+`pass_mark` sits next to `mark` and `maximum_mark` and looks like a third
+mark. It isn't. **80 of this account's 138 marked exercises have a
+`pass_mark` greater than their own `maximum_mark`** ✅ — a pass mark of
+40 on an exercise marked out of 10 — which a raw mark could never be.
+
+| comparison | exercises reported as passed |
+|---|---|
+| `mark >= pass_mark` | 54 / 138 |
+| **`percentage >= pass_mark`** | **138 / 138** ✅ |
+
+138/138 is the right answer: the lowest percentage on this account is
+60.0%, so nothing was failed. The raw comparison would have invented 84
+failures in a record of someone's degree.
+
+The output carries `pass_mark_is_percent: true` alongside it, so the file
+doesn't re-create the same ambiguity for whoever reads it next.
 
 ### 6.1 Not doing: module-level averages ⚠️
 

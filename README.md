@@ -27,12 +27,15 @@ imperial-doc-download/
 │       │   ├── ssh.py          #   the GitLab/gitolite Host blocks
 │       │   ├── cloning.py      #   what to clone where, and running git
 │       │   └── step.py         #   the pipeline Step
-│       ├── emarking_fetch/     # eMarking: coursework files  (implemented)
+│       ├── emarking_fetch/     # eMarking: coursework + marks  (implemented)
 │       │   ├── proxy.py        #   ssh -D SOCKS proxy into the DoC network
 │       │   ├── client.py       #   GET-only async client, retries, streaming
-│       │   ├── models.py       #   Exercise / Submission / Feedback
+│       │   ├── models.py       #   Module / Exercise / Submission / Feedback
 │       │   ├── naming.py       #   pure: FS-safe names, header parsing
-│       │   └── step.py         #   the pipeline Step
+│       │   ├── grading.py      #   pure: grade boundaries, status colours
+│       │   ├── marks.py        #   pure: builds the marks record
+│       │   ├── step.py         #   the download Step
+│       │   └── marks_step.py   #   the marks-record Step
 │       └── scientia_fetch/     # placeholder: Scientia (timetable/exams)
 └── tests/
     └── fixtures/labts/         # anonymised real markup, for offline tests
@@ -183,7 +186,16 @@ specs, submissions, supplementary files and feedback — into
     └── feedback/<id>/{metadata.json,<filename>}
 ```
 
-with a record of everything in `<output_dir>/emarking-files.json`.
+with a record of everything in `<output_dir>/emarking-files.json`, plus
+the marks record described below.
+
+**Scope is your enrolment, not just what you submitted.** The module list
+comes from abc-api's `/{year}/students?login=<you>`, and everything in
+those modules is downloaded — including tutorials and optional
+courseworks you never attempted, because their specs are worth keeping.
+That client method takes no username argument, so it can't be aimed at
+another student, and only the module code and title are ever persisted
+from a record that also contains your cid, email and personal tutor.
 
 **This one is read-only by construction, and deliberately so.** eMarking
 is not a reports system: among its routes are ones that submit coursework,
@@ -199,13 +211,56 @@ SSH SOCKS proxy (`ssh -N -D`) on a randomly chosen `shell1-5`, on a free
 ephemeral port picked at runtime. Keys, passphrases and the throwaway ssh
 config are handled by the same shared machinery the clone step uses.
 
-Re-runs are cheap and quiet. A file already on disk is left alone; an
-answer the API has settled is not asked about again — that includes model
-answers, which exist but are a `403` for students every time, and the 21
-of 25 academic years that answer `500`/`502` rather than coming back
-empty. `--force` redoes everything, and `--year 2526` re-checks a single
-year (worth doing for the current one, which can gain data after an empty
-run).
+Re-runs are cheap and quiet. A file already on disk is left alone, and an
+answer the API has settled — a `404`, a `403`, a year you weren't
+enrolled in — is not asked about again. `--force` redoes everything, and
+`--year 2526` re-checks a single year (worth doing for the current one,
+which can gain data after an empty run).
+
+**Model answers are opt-in and off by default.** Every one returns `403`,
+and that is the system working rather than something to route around:
+releasing them would leak future years' answers. `--model-answers` tries
+anyway, if you want the refusals on record.
+
+### The marks record
+
+`emarking-marks` then writes `<output_dir>/emarking-marks.json` — the
+personal-record page as JSON. Every exercise with a mark, across every
+year, with its deadline, mark, percentage, grade, pass/fail and status
+colour, grouped by module:
+
+```json
+{
+  "number": 1,
+  "label": "1 | CW: CPU Microarchitecture design space exploration",
+  "category": "individual", "colour": "green",
+  "deadline": "2024-11-06T19:00:00+00:00",
+  "submitted": true, "mark": 14, "maximum_mark": 20,
+  "percentage": 70.0, "grade": "A",
+  "pass_mark": 40, "pass_mark_is_percent": true, "passed": true,
+  "has_feedback": true
+}
+```
+
+The grade and the colour are **computed** — neither is in the API, since
+the page derives both in the browser. The boundaries (`A*` ≥ 80, `A` ≥ 70,
+…) and the colour legend are written into the file itself, so the record
+explains its own vocabulary. Colours follow the page: green is an
+individual exercise, purple a group one.
+
+This step costs no requests — it reshapes what the download step already
+has, or reads it back off disk. `imperial-doc-download emarking-marks`
+rebuilds it on its own without touching the network.
+
+Two things here that look wrong until you check them:
+
+- **`pass_mark` is a percentage, not a mark.** 80 of this account's 138
+  marked exercises have a `pass_mark` larger than their own
+  `maximum_mark` (40, out of a maximum of 10). Comparing it against the
+  raw mark reports failures that never happened.
+- **The colour's precedence is assessment before group-ness.** An
+  unmarked *group* exercise is brown or grey, not purple — there is no
+  fifth "unassessed group" swatch.
 
 Some things the live API does that the code is built around, rather than
 assuming otherwise — the evidence is in `docs/emarking-fetch-plan.md` §9:
@@ -215,6 +270,8 @@ assuming otherwise — the evidence is in `docs/emarking-fetch-plan.md` §9:
   response's `Content-Length` instead
 - every feedback file is served as `<username>.pdf`, whatever the module,
   hence the per-feedback-id directory
+- a `403` is a normal answer, not just for model answers: supplementary
+  files in modules you enrolled in but didn't take are refused too
 - a submission can be a git commit rather than a file; those are recorded
   and never requested (that endpoint `500`s for them — `gitlab_fetch` is
   what has the code)
@@ -252,6 +309,9 @@ uv run imperial-doc-download emarking --output-dir ./imperial-data
 
 # just one year, at a gentler rate
 uv run imperial-doc-download emarking --year 2526 --delay 2
+
+# rebuild emarking-marks.json from an earlier run, no network
+uv run imperial-doc-download emarking-marks
 ```
 
 > **Don't `source` your `.env`.** If your password contains shell
@@ -266,7 +326,8 @@ pipeline:
 |---|---|
 | `imperial-doc-download labts` | implemented — fetches the repository list, then clones |
 | `imperial-doc-download gitlab` | implemented — the clone half on its own |
-| `imperial-doc-download emarking` | implemented — coursework specs, submissions and feedback |
+| `imperial-doc-download emarking` | implemented — coursework files, then the marks record |
+| `imperial-doc-download emarking-marks` | implemented — rebuilds the marks record offline |
 | `imperial-doc-download scientia` | placeholder |
 
 Eventually the root command will run them all in parallel. That only

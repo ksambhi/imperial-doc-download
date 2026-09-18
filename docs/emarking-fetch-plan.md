@@ -8,12 +8,6 @@ Everything marked ✅ was verified against the live API — including all of
 §9, which is now answered. Four of those answers changed the design;
 where they did, the section above says so and §9 has the evidence.
 
-**Pending change:** §3.3.1 replaces the shipped keep-rule with an
-enrolment-based one. The code currently implements the old, narrower rule
-(`Exercise.is_ours`), so this is a change to make, not a description of
-what runs today. See §3.3.1 for the scope and cost, and
-`emarking-marks-plan.md` §8 for the code changes.
-
 Two things the implementation added that aren't below:
 
 - **Empty years are remembered** in the manifest and not re-probed,
@@ -447,6 +441,14 @@ A clean, distinguishable set of responses:
 | exercise number doesn't exist | `404 {"detail":"Exercise not found."}` |
 | no credentials | `401` |
 | **model answer** | `403 {"detail":"You are not allowed to access this resource."}` |
+| an artefact in a module we enrolled in but didn't take | `403` — see below |
+
+**403 is not unique to model answers.** The enrolment-based scope
+(§3.3.1) surfaced two *supplementary* files that are also refused —
+`2425/60005` exercises 4 and 5, in a module enrolled in but not taken.
+So 403 means "not yours to have", of which model answers are the
+systematic case rather than the only one. The handling was already right:
+terminal, recorded, never retried.
 
 **Every single model answer is 403.** All 45 exercises whose metadata
 carries a non-null `model_answer` were probed and all 45 were refused,

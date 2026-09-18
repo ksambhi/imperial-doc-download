@@ -218,10 +218,38 @@ class TestOrderingAndShape:
         # Only the two reachable categories are advertised.
         assert [c["category"] for c in record["categories"]] == ["individual", "group"]
 
-    def test_pass_and_cap_fields(self) -> None:
+    def test_pass_mark_is_a_percentage_not_a_raw_mark(self) -> None:
+        """The trap: `pass_mark` looks like a mark and isn't.
+
+        80 of this account's 138 marked exercises have a `pass_mark`
+        larger than their own `maximum_mark`, so comparing it against the
+        raw mark would report failures that never happened.
+        """
         row = _rows(_record())[0]
         assert row["pass_mark"] == 40
-        assert row["passed"] is False  # 14 is below a pass mark of 40
+        assert row["pass_mark_is_percent"] is True
+        # 14/20 is 70%, comfortably past a 40% pass mark -- even though
+        # the raw mark, 14, is below 40.
+        assert row["mark"] < row["pass_mark"]
+        assert row["passed"] is True
+
+    def test_pass_mark_above_the_maximum_mark_still_works(self) -> None:
+        # 9/10 with a pass mark of 40: nonsense as a raw comparison,
+        # 90% >= 40% as a percentage.
+        exercises = [_exercise(mark=9, maximum=10, pass_mark=40)]
+        row = _rows(_record(exercises))[0]
+        assert row["percentage"] == 90.0
+        assert row["passed"] is True
+
+    def test_an_actual_failure_is_reported_as_one(self) -> None:
+        exercises = [_exercise(mark=3, maximum=10, pass_mark=40)]
+        row = _rows(_record(exercises))[0]
+        assert row["percentage"] == 30.0
+        assert row["passed"] is False
+        assert row["grade"] == "F"
+
+    def test_cap_fields(self) -> None:
+        row = _rows(_record())[0]
         assert row["cap"] is None and row["withheld"] is None
 
     def test_label_without_a_type(self) -> None:

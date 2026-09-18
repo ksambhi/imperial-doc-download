@@ -115,7 +115,8 @@ def _exercise(exercise: Exercise) -> dict[str, Any]:
         "percentage": percentage,
         "grade": grade_for(percentage),
         "pass_mark": pass_mark,
-        "passed": None if (value is None or pass_mark is None) else value >= pass_mark,
+        "pass_mark_is_percent": True,
+        "passed": _passed(percentage, pass_mark),
         "weight": exercise.weight,
         "marks_published": exercise.marks_published,
         "cap": mark.get("cap"),
@@ -123,6 +124,21 @@ def _exercise(exercise: Exercise) -> dict[str, Any]:
         "withheld": mark.get("withheld"),
         "has_feedback": exercise.feedback is not None,
     }
+
+
+def _passed(percentage: float | None, pass_mark: float | None) -> bool | None:
+    """Whether the exercise was passed.
+
+    **`pass_mark` is a percentage, not a raw mark**, so it is compared
+    against the percentage. It looks like a mark and isn't: 80 of this
+    account's 138 marked exercises have a `pass_mark` greater than their
+    own `maximum_mark` (40 out of a maximum of 10, say), which a raw mark
+    could never be. Comparing raw would report 84 failures on an account
+    whose lowest grade is a B.
+    """
+    if percentage is None or pass_mark is None:
+        return None
+    return percentage >= pass_mark
 
 
 def label_for(exercise: Exercise) -> str:
