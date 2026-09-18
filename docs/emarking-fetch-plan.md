@@ -8,6 +8,12 @@ Everything marked ✅ was verified against the live API — including all of
 §9, which is now answered. Four of those answers changed the design;
 where they did, the section above says so and §9 has the evidence.
 
+**Pending change:** §3.3.1 replaces the shipped keep-rule with an
+enrolment-based one. The code currently implements the old, narrower rule
+(`Exercise.is_ours`), so this is a change to make, not a description of
+what runs today. See §3.3.1 for the scope and cost, and
+`emarking-marks-plan.md` §8 for the code changes.
+
 Two things the implementation added that aren't below:
 
 - **Empty years are remembered** in the manifest and not re-probed,
@@ -150,12 +156,17 @@ that year**, not the user's. Measured on 2324 ✅:
 | modules I actually did | 12 |
 
 What makes it "personal" is that `submissions`, `feedback` and `mark` are
-populated **only where they relate to the requesting user**. So the
-selection rule is local and needs no extra call:
+populated **only where they relate to the requesting user**. So a purely
+local selection rule is possible:
 
-> Keep an exercise if it has any `submissions`, a `feedback`, or a
+> ~~Keep an exercise if it has any `submissions`, a `feedback`, or a
 > `mark`. Everything else is another cohort's coursework that happens to
-> be in the same response.
+> be in the same response.~~
+
+> **Superseded — see §3.3.1.** That rule is what shipped, and it is too
+> narrow: it keeps only exercises we *did something on*, and so drops
+> tutorials, optional courseworks and other material from modules we
+> actually took. The rule is now **enrolment-based**.
 
 The 9-exercise gap between "any submission" and "my submission" is
 entirely group coursework ✅ — every one of those exercises has
@@ -166,25 +177,100 @@ That is our work and **is** downloaded. (Checked explicitly, because a
 before it's written off. Nothing in the response relates to anyone
 outside our own groups.)
 
-### 3.4 Do we need the `module_code` filter? No.
+### 3.3.1 ✅ The enrolment list exists after all — scope by module
+
+There **is** an endpoint that returns this user's modules for a year, and
+§3.4 was wrong to conclude otherwise (it checked the singular
+`/{year}/students/{username}`, not the filtered plural):
+
+```
+GET https://abc-api.doc.ic.ac.uk/{year}/students?login={IMPERIAL_USERNAME}
+```
+
+Authenticated, returns a **one-element list** — our own record — whose
+`modules` array carries `code`, `title`, `ects`, `terms`,
+`applicable_cohorts`, `exam_contribution`, `coursework_contribution` and
+`level` ✅. So the new rule is:
+
+> Keep an exercise if its `module_code` is one of the modules we were
+> enrolled in that year.
+
+**This is strictly safer than the old rule.** Measured across all four
+years ✅, enrolment is a **superset** of involvement — every module we
+have a submission, feedback or mark in is in the enrolment list, in every
+year:
+
+| Year | enrolled modules | modules inferred from involvement | involved exercises that enrolment would lose |
+|---|---|---|---|
+| 2223 | 11 | 8 | **0** |
+| 2324 | 14 | 12 | **0** |
+| 2425 | 14 | 7 | **0** |
+| 2526 | 11 | 9 | **0** |
+
+What it gains is the material the old rule threw away — `50007.1`
+tutorials (`C Picture Processing`, `Linking and Loading`), group-formation
+entries, and optional courseworks that were set and not attempted
+(`Scala Recursive-Descent Parser (Optional)`). Those have specs worth
+having, which is the whole point.
+
+Cost of the wider scope ✅:
+
+| Year | exercises (old → new) | downloads (old → new) |
+|---|---|---|
+| 2223 | 66 → 110 | 166 → 237 |
+| 2324 | 44 → 67 | 84 → 117 |
+| 2425 | 16 → 31 | 40 → 65 |
+| 2526 | 20 → 45 | 52 → 100 |
+| **Total** | **146 → 253** | **342 → 519** |
+
+Three rules that come with it:
+
+- **Never call this route unfiltered.** `/{year}/students` without
+  `?login=` is every student in the department. The client method must
+  take **no username argument** and always use the configured one, so
+  "fetch someone else's enrolment" is not an expressible call — the same
+  by-construction approach as GET-only.
+- **`modules_helped` is not scope.** The record also lists modules this
+  user helped teach (`50007.1`, `50007.3`, `50002` in 2526 ✅). That is
+  a teaching role, not our coursework, and including it would pull in
+  material we hold for someone else's benefit. Use `modules` only.
+- **Persist only `code` and `title`.** The record also contains `cid`,
+  `email`, `firstname`, `lastname`, `personal_tutor`, `cohort`,
+  `degree_year` and `studentstatus`. We need none of it, and
+  `personal_tutor` names a member of staff. Read the modules, drop the
+  rest — never write this record to disk verbatim.
+
+A few enrolled modules have no eMarking exercises at all and simply match
+nothing (`COMPM0804 Student Support and Wellbeing`, `40018A`,
+`CLCC60014`, …) ✅ — harmless.
+
+### 3.4 ⚠️ Superseded: "there is no endpoint that gives the module list"
+
+Kept because it's wrong, and the reasoning is worth not repeating.
 
 `module_code` is a **repeatable array** query param, defaulting to `[]`
 = no filter ✅. Filtering server-side would need the user's module list
-up front, and there is no endpoint that gives one:
+up front, and ~~there is no endpoint that gives one~~ — **there is; see
+§3.3.1**. What was actually checked:
 
 - abc-api `/{year}/students/{username}` returns cohort, degree and
-  personal details — **no modules** ✅
+  personal details — **no modules** ✅. True, but this is the *singular*
+  route; the plural `/{year}/students?login=…` is a different operation
+  and does return them. Checking one and concluding about the other was
+  the mistake.
 - abc-api `/{year}/modules` lists a year's modules with
   `applicable_cohorts` ✅ — that's what a cohort *could* take, not what
-  this user did, so electives would be wrong in both directions
+  this user did, so electives would be wrong in both directions. Still
+  true, and still not the right source.
 - the rest of abc-api is staff-facing (all-students-list, enrolled,
   careers, profile images, tutoring allocations) and out of bounds per §1
 
-So: **one unfiltered request per year, filtered locally.** 421 KB for
-2324, and at most 25 years, which is a few MB of JSON for the whole
-history — cheaper and politer than a request per module, and it can't
-miss a module we forgot to ask about. `module_code` stays available if a
-year ever turns out to be unmanageable.
+The conclusion survives anyway: **one unfiltered request per year,
+filtered locally.** 421 KB for 2324, and at most 25 years, which is a few
+MB of JSON for the whole history — cheaper and politer than a request per
+module, and it can't miss a module we forgot to ask about. The enrolment
+list is now used to filter that response *locally*, not to drive
+per-module requests.
 
 ### 3.5 The download endpoints
 

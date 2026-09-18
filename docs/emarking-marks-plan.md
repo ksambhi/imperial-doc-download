@@ -1,24 +1,47 @@
 # Implementation plan: `emarking_fetch` marks record
 
-Save the personal record — every exercise, deadline, mark, grade and
-status colour across every academic year — as one JSON file at the root
-of the output directory.
+Save the personal record — every marked exercise, with its deadline,
+mark, grade and status colour, across every academic year — as one JSON
+file at the root of the output directory.
 
 Status: **plan only, nothing implemented.** Everything marked ✅ was
 verified against the live API on 2026-09-18. Builds on
 `emarking-fetch-plan.md`, whose §1 safety rules apply unchanged.
 
-**§10.1 needs a decision before implementing** — the colour legend
-revealed that the page shows rows our current keep-rule drops.
+This plan also carries the **enrolment-based scope change** to the
+existing download step (`emarking-fetch-plan.md` §3.3.1), because both
+changes are driven by the same new endpoint and touch the same code.
 
-## 1. The headline: this costs almost no requests ✅
+## 1. Two scopes, deliberately different
 
-`GET /me/{year}/exercises` — the one call `emarking-fetch` already makes
-per year — **already contains every column of that page**. The marks
-record is a reshaping of data we have, not a new harvest.
+The colour legend exposed a real gap, and the fix splits in two:
 
-Confirmed by listing every `/me/*` route in the live openapi (v2.0.0) ✅.
-There are exactly four, and none of them is a marks endpoint:
+| | Rule | Rows | Why |
+|---|---|---|---|
+| **Download step** (existing, widening) | every exercise in a module we were **enrolled** in | 146 → **253** ✅ | tutorials and optional courseworks have specs worth keeping |
+| **Marks record** (new) | every exercise with a **mark** | **138** ✅ | a record of marks; an unmarked tutorial has nothing to record |
+
+The marks record is therefore a *subset* of what the download step
+walks, not a different query. Both come from the same
+`/me/{year}/exercises` response.
+
+**Widening the download scope does not change the marks record** ✅ — a
+mark only exists where we were involved, and every such module is in the
+enrolment list, so the marked count is 138 under either rule:
+
+| Year | marked anywhere | marked within enrolled modules |
+|---|---|---|
+| 2223 | 64 | 64 |
+| 2324 | 44 | 44 |
+| 2425 | 15 | 15 |
+| 2526 | 15 | 15 |
+
+## 2. The data: no new emarking requests, one new abc-api call ✅
+
+`GET /me/{year}/exercises` — which `emarking-fetch` already makes per
+year — **already contains every column of that page**. Confirmed by
+listing every `/me/*` route in the live openapi (v2.0.0) ✅; there are
+exactly four and none is a marks endpoint:
 
 ```
 GET /me/{year}/exercises                                        ← we use this
@@ -29,39 +52,52 @@ GET /me/{year}/{module_code}/exercises/{exercise_number}/group
 
 The endpoints that *sound* right — `/{year}/consolidated-marks`,
 `/{year}/{module_code}/exercises/{n}/marks`, `/{year}/missing-marks`,
-`/{year}/{student_username}/exercise-summaries`,
-`/{year}/students/{username}/exercises` — are **all staff routes over
-other people's data**, and per `emarking-fetch-plan.md` §1 they are not to
-be called. Not for completeness, not to see if they work. We don't need
-them: everything is in `/me/{year}/exercises` already.
+`/{year}/{student_username}/exercise-summaries` — are **all staff routes
+over other people's data**, and per `emarking-fetch-plan.md` §1 they are
+not to be called. We don't need them.
 
-**One thing is genuinely missing: the module title.** The exercise
-carries `module_code: "60001"` but not `"Advanced Computer
-Architecture"`. §2 is about where that comes from.
+### 2.1 The one new call, and its three safety rules
 
-## 2. Safety: one new endpoint, and it's a public one
+```
+GET https://abc-api.doc.ic.ac.uk/{year}/students?login={IMPERIAL_USERNAME}
+```
 
-`emarking-fetch-plan.md` §1 applies in full — GET only, personal
-endpoints only, sequential with a delay, never log credentials.
+Authenticated; returns a one-element list — our own record ✅. It solves
+**both** problems at once: the `modules` array is the enrolment scope
+*and* it carries `title`, so there is no second lookup for module names.
 
-The one addition is abc-api's module catalogue. Three candidates were
-checked ✅ and the choice matters:
+| | |
+|---|---|
+| `modules[]` | `code`, `title`, `ects`, `terms`, `applicable_cohorts`, `exam_contribution`, `coursework_contribution`, `level` ✅ |
+| also in the record | `cid`, `email`, `firstname`, `lastname`, `personal_tutor`, `cohort`, `degree_year`, `studentstatus`, `modules_helped` |
 
-| Endpoint | Auth | Returns | Verdict |
-|---|---|---|---|
-| `/{year}/modules` | **required** | code, title, ects, terms, cohorts, pass marks, **`staff` (lecturers' names and logins)** | ❌ more than we need, including third-party data |
-| `/{year}/modules-metadata` | required | — | ❌ `403 You cannot perform this operation` — staff-only |
-| **`/{year}/public/modules`** | **none** ✅ | exactly `{code, title, ects}` ✅ | ✅ **use this** |
+1. **Never unfiltered.** `/{year}/students` with no `?login=` is every
+   student in the department. The client method takes **no username
+   argument** and always uses the configured one, so requesting someone
+   else's enrolment is not an expressible call — the same
+   safe-by-construction approach as GET-only.
+2. **`modules_helped` is not scope.** It lists modules this user helped
+   *teach* (`50007.1`, `50007.3`, `50002` in 2526 ✅) — a teaching role,
+   not our coursework. Use `modules` only.
+3. **Persist `code` and `title`, nothing else.** `personal_tutor` names a
+   member of staff and the rest is our own identity data we have no use
+   for. Read the modules, drop the record — never write it to disk
+   verbatim.
 
-`/{year}/public/modules` is the right answer on every axis: it is
-explicitly public, needs no credentials at all, and returns the three
-fields we want and nothing else — no staff, no cohorts, no other
-students. It is a course catalogue, the same information a prospectus
-carries.
+### 2.2 `/{year}/public/modules` is no longer needed
 
-## 3. Where each column comes from (verified)
+An earlier draft used abc-api's public catalogue for titles. The
+enrolment record supplies them for every module in scope by definition,
+so that call is dropped — one endpoint instead of two. (For the record it
+does work, unauthenticated, returning exactly `{code, title, ects}` with
+100% coverage of our 36 module-years ✅. Worth remembering if the
+enrolment route ever stops being available.)
 
-### 3.1 The page, reproduced exactly ✅
+A title must still be allowed to be missing: if an exercise somehow
+carries a module code not in the enrolment list, the record keeps the
+code and sets `title: null` rather than crashing.
+
+## 3. The page, reproduced exactly ✅
 
 Running the mapping below over the cached 2425 response reproduces the
 screenshot row for row — marks, grades **and dot colours**:
@@ -79,45 +115,19 @@ screenshot row for row — marks, grades **and dot colours**:
 
 That last row is the useful one: **a mark with no submission and no
 feedback**. 14 exercises across the four years are marked without a
-submission ✅, and 8 have a submission with no mark ✅. So "submitted",
-"marked" and "has feedback" are three independent facts and none may be
-inferred from another.
+submission ✅. So "marked", "submitted" and "has feedback" are three
+independent facts and none may be inferred from another.
 
-### 3.2 Column → field
-
-| Page column | Source | Notes |
-|---|---|---|
-| status dot colour | derived — §5 | `requires_group` + whether it's marked/submitted |
-| module heading `60001: Advanced Computer Architecture` | `module_code` + abc-api `/{year}/public/modules` | §2 |
-| Exercise `1 \| CW: Decision Trees` | `number`, `type`, `title` | the page renders `<number> \| <type>: <title>` |
-| Deadline | `end` (never null ✅) | `extended_end` exists but is null throughout this account ✅ — carry it anyway |
-| Submitted ✓ | `submissions` non-empty | |
-| Mark `14 / 20` | `mark.mark` / `maximum_mark` | `mark` is a nested object, not a number |
-| Grade `A` | **computed client-side** — §4 | not in the API at all |
-| Feedback `View` | `feedback` non-null | |
-| "Show Unassessed" toggle | `mark is None` | 8 such exercises in our current set ✅ |
-| "Show Future" toggle | `end` in the future | |
-
-### 3.3 Module title coverage ✅ 100%
-
-All **36 (year, module) pairs** on this account resolve to a title in
-their own year's public catalogue — zero misses:
-
-| Year | modules of ours | missing titles |
-|---|---|---|
-| 2223 | 8 | 0 |
-| 2324 | 12 | 0 |
-| 2425 | 7 | 0 |
-| 2526 | 9 | 0 |
-
-The catalogue is also served for years emarking itself 502s on (`1819`
-returns 156 modules ✅), so it is not restricted to years we attended.
-Codes with a suffix resolve fine too — `50007.1` → `Laboratory 2` ✅.
-
-Still, a title must be allowed to be missing: this is a lookup against a
-different service, and a module withdrawn from a later catalogue would
-otherwise crash the run. Absent title → `null`, and the record still
-carries the code.
+| Page column | Source |
+|---|---|
+| status dot colour | derived — §5 |
+| module heading `60001: Advanced Computer Architecture` | `module_code` + the enrolment record's `modules[].title` |
+| Exercise `1 \| CW: Decision Trees` | `number`, `type`, `title` — rendered `<number> \| <type>: <title>` |
+| Deadline | `end` (never null ✅); `extended_end` is null throughout this account ✅ but carried anyway |
+| Submitted ✓ | `submissions` non-empty |
+| Mark `14 / 20` | `mark.mark` / `maximum_mark` — `mark` is a nested object, not a number |
+| Grade `A` | **computed client-side** — §4 |
+| Feedback `View` | `feedback` non-null |
 
 ## 4. The grade, which we compute ourselves
 
@@ -134,38 +144,36 @@ Not in the API — the page computes it in the browser, so we reproduce it:
 
 `percentage = 100 * mark.mark / maximum_mark`.
 
-Three things to get right:
-
-- **The boundaries are inclusive at the bottom.** 14/20 is exactly 70.0%
-  and the page shows `A`, not `B` ✅ — so `>=`, and no floating-point
-  rounding before the comparison.
-- **`maximum_mark` can be 0.** Exactly 8 exercises ✅, and they are
-  precisely the 8 unmarked ones. Dividing is a `ZeroDivisionError`
-  waiting for a run at 2am, so: no mark, or `maximum_mark` falsy →
-  `percentage: null`, `grade: null`, `assessed: false`.
+- **Boundaries are inclusive at the bottom.** 14/20 is exactly 70.0% and
+  the page shows `A`, not `B` ✅ — so `>=`, and no rounding before the
+  comparison.
+- **`maximum_mark` can be 0**, on exactly the 8 unmarked exercises ✅.
+  Those are excluded from this record by the has-a-mark filter, so the
+  divide is unreachable here — but `percentage_of()` must still return
+  `None` rather than raise, because the same helper is the obvious thing
+  to reuse and a `ZeroDivisionError` at 2am is a poor way to find out.
 - **Boundaries below `B` are unverified.** The lowest grade on this
-  account is `B` (distribution: A* 124, A 11, B 3 ✅), so `C`/`D`/`F`
-  can't be confirmed against the live page. They follow the standard
-  Imperial scheme and Kishan's "etc.", but the boundary table lives in
-  one constant and is written into the output (§6) so it's visible and
-  correctable rather than buried.
+  account is `B` (A* 124, A 11, B 3 ✅), so `C`/`D`/`F` can't be checked
+  against the live page. They follow the standard Imperial scheme and
+  Kishan's "etc.", and the table is written into the output (§6) so it's
+  visible and correctable rather than buried in source.
 
 ## 5. The status colour ✅
 
-The legend gives four states, and they are a **derived classification,
-not an API field** — like the grade. Verified against all seven
-screenshot rows, 7/7 ✅:
+Four states in the legend, and they are a **derived classification, not
+an API field** — like the grade. Verified against all seven screenshot
+rows, 7/7 ✅:
 
-| Colour | Legend wording | Rule |
-|---|---|---|
-| 🟢 green | Individual Exercise | marked, and `requires_group` is false |
-| 🟣 purple | Group Exercise | marked, and `requires_group` is true |
-| 🟤 brown | Unassessed, with submission | not marked, `submissions` non-empty |
-| ⚫ grey | Unassessed, no submission | not marked, no submissions |
+| Colour | Legend wording | Rule | In this record? |
+|---|---|---|---|
+| 🟢 green | Individual Exercise | marked, `requires_group` false | ✅ 91 |
+| 🟣 purple | Group Exercise | marked, `requires_group` true | ✅ 47 |
+| 🟤 brown | Unassessed, with submission | not marked, has submissions | ✗ excluded by §1 |
+| ⚫ grey | Unassessed, no submission | not marked, no submissions | ✗ excluded by §1 |
 
-In precedence order — **assessment first, then group-ness**. A group
-exercise that was never marked is brown or grey, not purple; there is no
-fifth "unassessed group" colour in the legend.
+Precedence is **assessment first, then group-ness**. A group exercise
+that was never marked is brown or grey, not purple — there is no fifth
+"unassessed group" colour.
 
 ```python
 def category(exercise):
@@ -174,15 +182,14 @@ def category(exercise):
     return "group" if exercise.requires_group else "individual"
 ```
 
-Counts over the current row set ✅: individual 91, group 47,
-unassessed-with-submission 8, **unassessed-no-submission 0**.
-
-That zero is not a coincidence, and it is the interesting part — see
-§10.1.
+The classifier stays complete even though the record's filter means only
+`individual` and `group` can ever reach the file. Two reasons: the brown
+and grey branches are what make the precedence rule testable, and if the
+filter is ever relaxed the function is already right.
 
 ## 6. Output schema
 
-One file, `<output_dir>/emarking-marks.json`, all years, as asked:
+One file, `<output_dir>/emarking-marks.json`, all years:
 
 ```json
 {
@@ -197,12 +204,10 @@ One file, `<output_dir>/emarking-marks.json`, all years, as asked:
     { "grade": "F",  "min_percent": 0  }
   ],
   "categories": [
-    { "category": "individual",                 "colour": "green",  "label": "Individual Exercise" },
-    { "category": "group",                      "colour": "purple", "label": "Group Exercise" },
-    { "category": "unassessed-no-submission",   "colour": "grey",   "label": "Unassessed, no submission" },
-    { "category": "unassessed-with-submission", "colour": "brown",  "label": "Unassessed, with submission" }
+    { "category": "individual", "colour": "green",  "label": "Individual Exercise" },
+    { "category": "group",      "colour": "purple", "label": "Group Exercise" }
   ],
-  "summary": { "years": 4, "modules": 36, "exercises": 146, "assessed": 138 },
+  "summary": { "years": 4, "modules": 36, "exercises": 138 },
   "years": {
     "2425": [
       {
@@ -218,11 +223,11 @@ One file, `<output_dir>/emarking-marks.json`, all years, as asked:
             "category": "individual",
             "colour": "green",
             "category_label": "Individual Exercise",
+            "requires_group": false,
             "deadline": "2024-11-06T19:00:00+00:00",
             "extended_deadline": null,
             "submitted": true,
             "submitted_at": "2024-11-06T17:22:41.113221+00:00",
-            "assessed": true,
             "mark": 14,
             "maximum_mark": 20,
             "percentage": 70.0,
@@ -234,8 +239,7 @@ One file, `<output_dir>/emarking-marks.json`, all years, as asked:
             "cap": null,
             "cap_reason": null,
             "withheld": null,
-            "has_feedback": true,
-            "requires_group": false
+            "has_feedback": true
           }
         ]
       }
@@ -246,197 +250,148 @@ One file, `<output_dir>/emarking-marks.json`, all years, as asked:
 
 Decisions baked in:
 
-- **The colour is stored three ways**: `category` (the stable slug to
-  program against), `colour` (the legend's own vocabulary), and
-  `category_label` (its exact wording). `requires_group` stays too, since
-  `category` deliberately hides it for unassessed rows.
-- **`categories` is written into the file**, the same way
-  `grade_boundaries` is, so the record explains its own vocabulary
-  without anyone reading our source.
-- **Colour names, not hex.** The legend's swatches are the only sample
-  we have and they're a screenshot of a dark theme, so a hex in here
-  would be a guess presented as fact. See §10.4.
-- **`years` is an object keyed by year; modules are an array.** The array
-  preserves the page's ordering (module code ascending, then exercise
-  number), which a JSON object wouldn't guarantee.
-- **`label` is precomputed** (`1 | CW: Decision Trees`) because that
-  exact string is what the page shows and what a later HTML/CSV
-  rendering would want. The parts are all still there separately.
+- **The colour is stored three ways**: `category` (stable slug to program
+  against), `colour` (the legend's vocabulary), `category_label` (its
+  exact wording). `requires_group` stays too, since `category` folds it
+  away for the unassessed states.
+- **Colour names, not hex.** The legend's swatches are a screenshot of a
+  dark theme, so a hex here would be a guess presented as fact. §10.3.
+- **`grade_boundaries` and `categories` are written into the file**, so
+  the record explains its own vocabulary without anyone reading our
+  source.
+- **`years` is an object keyed by year; modules are an array**, so the
+  page's ordering (module code ascending, then exercise number) survives.
+- **`label` is precomputed** — that exact string is what the page shows
+  and what a later HTML/CSV rendering wants. The parts remain separate.
 - **`marker` is deliberately omitted.** `mark.marker`,
   `marks_published_by` and `locked_by` are staff usernames. The page
-  doesn't show them, this record doesn't need them, and it's one less
-  reason for this file to be sensitive. They remain in the per-exercise
-  `exercise.json` the fetch step writes, faithfully.
-- **`cap` / `cap_reason` / `withheld` are carried even though all are
-  null across this account** ✅ — they're real API fields, and a capped
-  mark is exactly the thing you'd want the record to have recorded.
-- **Unassessed exercises are kept**, with `assessed: false` and null
-  mark/percentage/grade. The page has a toggle for them, so they're part
-  of the record, not noise.
+  doesn't show them and this record doesn't need them. They stay in the
+  per-exercise `exercise.json` the fetch step writes, faithfully.
+- **`cap` / `cap_reason` / `withheld` are carried** even though all are
+  null across this account ✅ — they're real fields, and a capped mark is
+  exactly what you'd want a record to have caught.
+- **A module with no marked exercises is omitted entirely**, rather than
+  appearing with an empty list.
 
 ### 6.1 Not doing: module-level averages ⚠️
 
-Tempting, and wrong to guess at. `weight` is **not normalised** ✅ —
-per-module weight sums across this account are:
+`weight` is **not normalised** ✅ — per-module sums across this account:
 
 ```
 100 → 28 modules     0 → 2      200 → 1     240 → 1
 400 →  1             600 → 1    800 → 2
 ```
 
-28 of 36 modules sum to 100, and the other 8 don't. So a weighted module
-average would be right most of the time and silently wrong the rest —
-the worst possible property for a record of your own marks. The raw
-`weight` is in the output; deriving a module total is left out until it's
-understood. See §10.2.
+28 of 36 sum to 100 and the rest don't, so a weighted average would be
+right most of the time and silently wrong otherwise — the worst property
+for a record of your own marks. Raw `weight` is in the output; see §10.1.
 
-## 7. Cost, caching and where it sits
+## 7. Cost and caching
 
-**Requests: 4 per cold run, 0 on a re-run.** One
-`/{year}/public/modules` per year that has data, cached to
-`<output_dir>/<year>/emarking-modules.json`. The exercise data is already
-on disk (`<output_dir>/<year>/emarking-exercises.json`) or in
-`ctx.state` from the fetch step in the same pipeline.
+| | requests |
+|---|---|
+| enrolment, cold | **1 per year with data (4)** |
+| enrolment, re-run | **0** — cached to `<output_dir>/<year>/emarking-enrolment.json` (modules only, §2.1) |
+| exercise data | **0** — already on disk or in `ctx.state` |
+| marks file itself | **0** — pure derivation, always rewritten |
 
-A consequence worth building for: **when every year's catalogue is
-already cached, the step needs no network at all — so it must not open
-the SOCKS proxy.** Starting an ssh tunnel to do nothing is both slow and
-rude. Check the cache first, open the proxy only if something is missing.
+The download step pays the widened scope: **342 → 519 downloads** on a
+cold run (`emarking-fetch-plan.md` §3.3.1). Re-runs are unaffected —
+everything already fetched stays cached.
 
-Structurally, a second step in the same pipeline:
+Because the enrolment cache makes a re-run need no network at all, the
+marks step **must not open the SOCKS proxy when every year is cached**.
+Starting an ssh tunnel to do nothing is slow and rude. Check the cache
+first; open the proxy only if something is missing.
 
-```
-imperial-doc-download emarking
-  ├── emarking-fetch   (existing)  → files + ctx.state["emarking_exercises"]
-  └── emarking-marks   (new)       → emarking-marks.json
-```
-
-`emarking-fetch` needs a one-line change: it already parses the
-exercises, so it should stash them in `ctx.state["emarking_exercises"]`
-the way `labts-fetch` stashes its list. Run standalone, `emarking-marks`
-reads `<output_dir>/*/emarking-exercises.json` instead — the same
-fall-back-to-disk pattern `gitlab-fetch` uses, and it means the marks
-record can be rebuilt with **zero requests** from an existing download.
-
-`--force` re-reads the catalogues; the marks file is always rewritten
-(it's cheap and derived).
-
-## 8. Files to write
+## 8. Code changes
 
 ```
 src/imperial_doc_download/emarking_fetch/
-├── grading.py        pure: GRADE_BOUNDARIES, CATEGORIES, grade_for(), category_for()
-├── marks.py          pure: build the record from Exercises + a title lookup
-├── marks_step.py     EmarkingMarksStep: catalogue fetch/cache, write, report
-├── client.py         + `modules(year)` — abc-api /{year}/public/modules, no auth
-└── step.py           + stash ctx.state["emarking_exercises"]
+├── client.py       + enrolment(year) -> abc-api /{year}/students?login=<configured user>
+│                     NO username parameter — see §2.1 rule 1
+├── models.py       + Enrolment (code+title only, drops the personal record)
+│                   ~ Exercise.is_ours -> replaced by module-scope filtering
+├── step.py         ~ scope exercises by enrolled module, not involvement
+│                   + stash ctx.state["emarking_exercises"] and ["emarking_enrolment"]
+├── grading.py      NEW pure: GRADE_BOUNDARIES, CATEGORIES, grade_for(), category_for()
+├── marks.py        NEW pure: build the record from Exercises + a title lookup
+└── marks_step.py   NEW EmarkingMarksStep: enrolment fetch/cache, write, report
 tests/
-├── test_emarking_grading.py   boundaries, the exact-70.0 case, max=0, all 4 categories
-└── test_emarking_marks.py     record assembly + the step end-to-end
+├── test_emarking_grading.py   NEW boundaries, exact-70.0, max=0, all four categories
+└── test_emarking_marks.py     NEW record assembly + the step end-to-end
 ```
 
-`grading.py` and `marks.py` stay free of I/O — that's what makes the
-interesting logic testable offline, same split as `labts_fetch/parsing.py`.
+Pipeline: `emarking-fetch` then `emarking-marks`, in the existing
+`emarking` subcommand. Run standalone, the marks step reads
+`<output_dir>/*/emarking-exercises.json` and the cached enrolment — the
+same fall-back-to-disk pattern `gitlab-fetch` uses — so the record can be
+rebuilt from an existing download with **zero requests**.
+
+`grading.py` and `marks.py` stay free of I/O, same split as
+`labts_fetch/parsing.py`.
+
+### 8.1 One migration wrinkle ⚠️
+
+`<output_dir>/<year>/emarking-exercises.json` currently holds the
+*narrow* row set, and is reused unless `--force`. After the scope change
+a plain re-run would keep reading the old 146-row cache and never notice
+the 107 new exercises.
+
+So the year cache needs to record which rule produced it — a `"scope":
+"enrolled"` marker alongside the exercises — and refetch when the marker
+is absent or stale. Silently honouring a stale cache is exactly the kind
+of thing that looks like it worked.
 
 ## 9. Testing
 
-The fixture is the screenshot: the seven 2425 rows above, plus an
-unassessed exercise (`maximum_mark: 0`), an unassessed one with no
-submission, and a module absent from the catalogue. Worth asserting:
+Fixture is the screenshot: the seven 2425 rows, plus an unmarked
+exercise, an unmarked one with no submission, an exercise in an enrolled
+module we never touched, and a module code absent from the enrolment.
 
-- 14/20 → `70.0` → `A` (the inclusive-boundary case, and the one real
-  example we can check against the rendered page)
+- 14/20 → `70.0` → `A` — the inclusive-boundary case, and the one example
+  checkable against the rendered page
 - 17/20 → `85.0` → `A*`; 100/100 → `100.0` → `A*`
-- `maximum_mark: 0` → percentage and grade both `null`, `assessed: false`,
-  and **no exception**
-- a mark with no submission → `submitted: false`, mark still present
-  (the 60015 row)
-- **all four colours**, and specifically that an *unmarked group*
-  exercise is brown/grey rather than purple — the precedence rule in §5
-  is the easy thing to get backwards
+- `maximum_mark: 0` → `percentage_of()` returns `None`, **no exception**
+- a mark with no submission → `submitted: false`, mark present (60015)
+- unmarked exercises are **absent from the marks record** but **present
+  in the download scope**
+- **all four categories**, including that an *unmarked group* exercise is
+  brown/grey not purple — §5's precedence is the easy thing to reverse
 - the seven screenshot rows map to their observed colours exactly
-- a module missing from the catalogue → `title: null`, code preserved,
-  run completes
+- a module absent from the enrolment → `title: null`, code preserved
 - modules sorted by code, exercises by number
-- `marker` / `marks_published_by` / `locked_by` appear **nowhere** in the
-  serialised output
-- the step makes zero requests when the catalogues are cached, and never
-  opens a proxy in that case
-- every grade boundary maps, including the C/D/F ones we have no live
-  data for
+- `marker` / `marks_published_by` / `locked_by` / `cid` / `email` /
+  `personal_tutor` appear **nowhere** in any serialised output
+- `modules_helped` never contributes to scope
+- `enrolment()` has no username parameter and cannot be aimed elsewhere
+- zero requests and **no proxy** when the enrolment cache is warm
+- a year cache without the `scope` marker is refetched (§8.1)
 
 ## 10. Open questions for Kishan
 
-### 10.1 ⚠️ Grey proves we're dropping rows the page shows — decide first
-
-There are **zero** grey exercises in our output, and there structurally
-always will be. `emarking-fetch-plan.md` §3.3's keep-rule is *"keep an
-exercise if it has a submission, feedback, or a mark"* — which is exactly
-the negation of grey. Yet the legend has a grey swatch, so the page
-plainly shows them.
-
-The page must therefore select rows by **module**, not by per-exercise
-involvement: your modules, then every exercise in them. Measured ✅:
-
-| Year | we keep | all exercises in those same modules | rows we'd be missing |
-|---|---|---|---|
-| 2324 | 44 | 66 | **22** |
-| 2425 | 16 | 17 | **1** |
-| 2526 | 20 | 41 | **21** |
-
-and the missing ones look like real record content — `50007.1` tutorials
-(`C Picture Processing`, `Linking and Loading`), group-formation entries,
-and **optional courseworks that were available and not done**
-(`Scala Recursive-Descent Parser (Optional)`).
-
-Three options:
-
-- **(a) Match the page — recommended.** Row set = every exercise in any
-  module we have involvement in. ~190 rows instead of 146, grey becomes
-  reachable, and the record shows what was on offer as well as what was
-  done. Costs nothing: same API response, wider local filter.
-- **(b) Keep the current rule.** 146 rows, all of them things you
-  actually did. Grey then never appears and should be dropped from
-  `categories` rather than advertised and never used.
-- **(c) Include them, flagged.** Option (a) plus an `involved: false`
-  marker so both views are one filter away.
-
-My recommendation is **(a)**, because you asked for the page and grey is
-on the page. Worth noting it does pull in a little noise — 2526's
-`70010/10 "test2627"` looks like a staff test exercise.
-
-**This only affects the marks record.** The download step's narrower rule
-should stay exactly as it is — a record row is free, a spec download is a
-request against a shared server.
-
-### 10.2 Module totals
-
-§6.1 leaves them out because `weight` isn't normalised. Options: leave it
-(safe), compute a weighted average only for the 28 modules whose weights
-sum to 100 and null elsewhere, or dig into what the other sums mean
-first.
-
-### 10.3 Exams and final module marks
-
-This record covers what eMarking holds, which is coursework. Final module
-marks and exam results aren't reachable — the endpoints that would have
-them are staff routes.
-
-### 10.4 Exact colours
-
-Do you want the real hex values in the JSON? They'd need sampling from
-the site's CSS rather than guessing from the screenshot. Colour *names*
-are in there either way, so this is only worth doing if you're planning
-to render the record.
-
-### 10.5 `50007.1` / `50007.2` / `50007.3`
-
-They resolve to `Laboratory 2` and friends and appear as three separate
-modules. Fine to leave as three rows?
+1. **Module totals** — §6.1 leaves them out because `weight` isn't
+   normalised. Leave it, compute only for the 28 modules that sum to 100,
+   or investigate the other sums first?
+2. **Model answers, now that scope widens.** Every one is a 403 (45/45
+   probed ✅), and the wider scope takes them from 48 to **117 requests
+   that will all be refused** on a cold run. Worth making them opt-in
+   (`--model-answers`, default off) rather than spending 117 requests
+   being told no? The manifest already stops re-runs retrying them.
+3. **Exact colours** — hex values would need sampling from the site's
+   CSS rather than guessing from the screenshot. Only worth it if you
+   plan to render the record.
+4. **Exams and final module marks** aren't reachable; the endpoints that
+   would have them are staff routes. The enrolment record does carry
+   `exam_contribution` / `coursework_contribution` per module, which is
+   the weighting, not the result — include it?
+5. **`50007.1` / `50007.2` / `50007.3`** resolve to `Laboratory 2` and
+   friends and appear as three modules. Leave as three?
 
 ## 11. Privacy note 🔒
 
 `emarking-marks.json` is a complete record of your marks for four years
-in one file. It's inside the gitignored output directory and stays there.
-Omitting `marker` (§6) keeps other people out of it, so the only personal
-data in it is yours.
+in one file. It lives in the gitignored output directory. Omitting
+`marker` (§6) and everything but `code`/`title` from the enrolment record
+(§2.1) keeps other people out of it entirely — the only personal data in
+it is yours.
