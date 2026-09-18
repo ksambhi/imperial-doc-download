@@ -1,23 +1,17 @@
 """Fetch data from Imperial DoC's self-hosted GitLab (gitlab.doc.ic.ac.uk).
 
-Placeholder module: this pipeline stage isn't implemented yet. Once it is,
-`GitlabFetchStep` gets added to the `steps` list built in `cli.py`, alongside
-the other `*_fetch` stages (`labts_fetch`, `scientia_fetch`, ...).
+Takes the repository list produced by `labts_fetch` and clones every
+repository into `<output_dir>/<academic_year>/gitlab/<repo>/`, falling back
+to the firewalled gitolite server (proxy-jumped through a DoC shell
+server) for repositories GitLab no longer serves.
+
+Needs `IMPERIAL_GITLAB_SSH_KEY`, plus `IMPERIAL_DOC_SSH_KEY` and
+`IMPERIAL_USERNAME` for the gitolite fallback. The user's `~/.ssh/config`
+is never read or written — see `ssh.py`.
 """
 
 from __future__ import annotations
 
-import logging
+from imperial_doc_download.gitlab_fetch.step import GitlabFetchStep
 
-from imperial_doc_download.pipeline import PipelineContext, Step
-
-logger = logging.getLogger(__name__)
-
-
-class GitlabFetchStep(Step):
-    """Clones/downloads repos (and any other data worth keeping) from DoC GitLab."""
-
-    name = "gitlab-fetch"
-
-    def run(self, ctx: PipelineContext) -> None:
-        raise NotImplementedError("gitlab-fetch is a placeholder and isn't implemented yet.")
+__all__ = ["GitlabFetchStep"]
