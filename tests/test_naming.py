@@ -1,4 +1,4 @@
-"""Offline tests for `imperial_doc_download.emarking_fetch.naming`.
+"""Offline tests for `imperial_doc_download.naming`.
 
 The nasty inputs here aren't hypothetical: the titles are real ones from
 this account's exercises (plan §9), and the traversal cases are what a
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from imperial_doc_download.emarking_fetch.naming import (
+from imperial_doc_download.naming import (
     exercise_directory,
     filename_from_disposition,
     guess_extension,

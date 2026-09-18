@@ -44,7 +44,7 @@ from imperial_doc_download.emarking_fetch.models import (
     enrolled_modules,
     for_modules,
 )
-from imperial_doc_download.emarking_fetch.naming import exercise_directory, safe_component
+from imperial_doc_download.naming import exercise_directory, safe_component
 from imperial_doc_download.pipeline import PipelineContext, Step
 from imperial_doc_download.proxy import SocksProxy
 

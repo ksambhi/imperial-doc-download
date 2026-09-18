@@ -1,13 +1,14 @@
 """Pure helpers for turning remote strings into safe local filenames.
 
 No I/O except the optional `file --extension` probe, so this is the part
-of `emarking_fetch` that can be tested exhaustively offline.
+of the download pipelines that can be tested exhaustively offline.
 
-Everything here treats its input as hostile. Exercise titles are free text
-written by lecturers (`Task 1: Framework and Labts warm-up`,
-`C Project Final Report+Source`), and `Content-Disposition` filenames come
-straight off the wire — a `filename="../../.bashrc"` must land inside the
-directory it was meant for, not wherever it fancied.
+Everything here treats its input as hostile, because all of it is remote.
+Exercise titles are free text written by lecturers (`Task 1: Framework
+and Labts warm-up`, `C Project Final Report+Source`); zip members name
+their own paths; and `Content-Disposition` filenames come straight off
+the wire — a `filename="../../.bashrc"` must land inside the directory it
+was meant for, not wherever it fancied.
 """
 
 from __future__ import annotations
