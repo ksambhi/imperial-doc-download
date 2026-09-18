@@ -15,6 +15,9 @@ imperial-doc-download/
 │       ├── config.py           # Settings, loaded from env vars
 │       ├── logging.py          # coloured console + file logging
 │       ├── ssh.py              # shared: throwaway ssh config, keys, agent
+│       ├── proxy.py            # shared: ssh -D SOCKS tunnel into DoC
+│       ├── doc_api.py          # shared: GET-only async client for the DoC APIs
+│       ├── naming.py           # shared: pure, FS-safe names
 │       ├── pipeline/           # generic pipeline machinery
 │       │   ├── base.py         #   Step, PipelineContext
 │       │   └── runner.py       #   Pipeline: runs an ordered list of Steps
@@ -37,6 +40,10 @@ imperial-doc-download/
 │       │   ├── results_html.py #   pure: renders the results page
 │       │   ├── step.py         #   the download Step
 │       │   └── marks_step.py   #   the marks-record Step
+│       ├── materials_fetch/    # eMarking materials: lecture notes  (implemented)
+│       │   ├── client.py       #   the one route: /resources/zipped
+│       │   ├── archive.py      #   pure: safe zip extraction
+│       │   └── step.py         #   the pipeline Step
 │       └── scientia_fetch/     # placeholder: Scientia (timetable/exams)
 └── tests/
     └── fixtures/labts/         # anonymised real markup, for offline tests
@@ -48,9 +55,11 @@ scratch `state` dict steps can use to pass data along, e.g. an
 authenticated session from a login step to the steps that use it).
 
 Each Imperial system to back up is its own self-contained module —
-`labts_fetch`, `gitlab_fetch`, `emarking_fetch`, and so on — each
-implementing one `Step` subclass. Those three are implemented;
-`scientia_fetch` is still a placeholder. Each gets its own CLI
+`labts_fetch`, `gitlab_fetch`, `emarking_fetch`, `materials_fetch`, and
+so on — each implementing one `Step` subclass. Those four are
+implemented; `scientia_fetch` is still a placeholder. What they share —
+the SOCKS proxy, the GET-only HTTP client, filename sanitising — lives at
+the top level rather than in whichever pipeline needed it first. Each gets its own CLI
 subcommand in `cli.py`, so pipelines can be built and run one at a time.
 (Module names use underscores, not hyphens — `-` isn't valid in a Python
 import name.)
@@ -294,6 +303,45 @@ assuming otherwise — the evidence is in `docs/emarking-fetch-plan.md` §9:
 - the largest artefact seen is 48 MB, so downloads stream to a temp file
   and are renamed into place
 
+### `materials_fetch`
+
+Downloads one zip of teaching materials per enrolled module — lecture
+notes, slides, handouts — and extracts it into
+`<output_dir>/<year>/<module_code>/materials/`, beside that module's
+`emarking/` directory:
+
+```
+2425/60019/materials/
+├── .materials.json                     what was extracted, and from which zip
+├── Lectures/(0) Lecture 1-Introduction.pdf
+└── Practicals/(1) Practical 2-Sensors and Feedback Control.pdf
+```
+
+Scope is the same enrolment list `emarking` uses and caches, so running
+that first means this costs no extra abc-api requests.
+
+**The zip is deleted once it has extracted cleanly** — the full set is
+~1.75 GB and keeping both halves doubles that. `--keep-zip` retains them.
+A failed extraction keeps its zip, so a retry doesn't re-download 189 MB.
+The `.materials.json` marker is written last and is what makes a re-run
+free: modules already extracted cost no request at all.
+
+**Extraction is the careful part.** A zip names its own output paths and
+these come off the network, so `archive.py` plans the extraction before
+writing anything: members resolving outside the target are dropped and
+the result re-checked, symlink entries are skipped rather than inherited
+as files, and declared uncompressed size and member count are capped
+before a byte is written. It stages in a temp directory and moves into
+place, so a failure leaves the previous tree intact.
+
+Every member of these zips is prefixed with the module code, which would
+nest it twice. That prefix is stripped when — and only when — every
+member shares it, since stripping otherwise could merge two trees.
+
+Measured on this account: **46 zips, 1.75 GB, ~21 min sequential**; four
+modules publish no materials and answer `404`, which is recorded rather
+than retried as an error.
+
 ## Usage
 
 ```bash
@@ -322,13 +370,26 @@ IMPERIAL_DOC_SSH_KEY=/home/you/.ssh/doclab          # key for the shell servers
 
 ```bash
 # LabTS list → clone every repo → eMarking files → marks record + web page
-uv run imperial-doc-download all -j 4
+uv run imperial-doc-download all
+
+# ...and the ~1.75 GB of teaching materials too
+uv run imperial-doc-download all --materials
 ```
 
-`all` runs the four steps against one shared context and **keeps going if
+`all` runs every pipeline against one shared context and **keeps going if
 one fails** — LabTS being down is no reason to lose the eMarking half.
 What failed is listed at the end and the exit code is non-zero. Re-run to
 retry just the failures; everything already downloaded is left alone.
+
+Each pipeline has a switch: `--skip-labts`, `--skip-gitlab`,
+`--skip-emarking`, and `--skip-materials`. **Materials is the only one
+skipped by default** — at ~1.75 GB it's an order of magnitude more than
+everything else combined, so `--materials` opts in.
+
+`-j/--concurrency` defaults to this machine's CPU count. The HTTP
+pipelines still wait `--delay` after each request, so raising it raises
+the request rate rather than removing the throttle — lower it, or raise
+`--delay`, against anything that looks strained.
 
 Or run the pipelines separately:
 
@@ -354,6 +415,9 @@ uv run imperial-doc-download emarking --year 2526 --delay 2
 
 # rebuild emarking-marks.json from an earlier run, no network
 uv run imperial-doc-download emarking-marks
+
+# teaching materials; needs emarking's enrolment cache, or --year
+uv run imperial-doc-download materials --keep-zip
 ```
 
 There is one subcommand per Imperial system, each running its own
@@ -366,6 +430,7 @@ pipeline:
 | `imperial-doc-download gitlab` | implemented — the clone half on its own |
 | `imperial-doc-download emarking` | implemented — coursework files, then the marks record |
 | `imperial-doc-download emarking-marks` | implemented — rebuilds the marks record offline |
+| `imperial-doc-download materials` | implemented — lecture notes and handouts (~1.75 GB) |
 | `imperial-doc-download scientia` | placeholder |
 
 `--dry-run` lists the steps that would run without downloading anything.
