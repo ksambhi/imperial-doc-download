@@ -25,6 +25,13 @@ The marks record is therefore a *subset* of what the download step
 walks, not a different query. Both come from the same
 `/me/{year}/exercises` response.
 
+Decided alongside the widening: **model answers become opt-in and default
+off** (`emarking-fetch-plan.md` §9.3.1). Every one is a 403, the wider
+scope would take that from 48 to 117 refusals per cold run, and the
+refusal is the system working as intended — archiving model answers would
+leak future years' answers. Net effect on the cold run: **294 → 402 real
+downloads**, rather than 342 → 519.
+
 **Widening the download scope does not change the marks record** ✅ — a
 mark only exists where we were involved, and every such module is in the
 enrolment list, so the marked count is 138 under either rule:
@@ -314,6 +321,8 @@ src/imperial_doc_download/emarking_fetch/
 │                   ~ Exercise.is_ours -> replaced by module-scope filtering
 ├── step.py         ~ scope exercises by enrolled module, not involvement
 │                   + stash ctx.state["emarking_exercises"] and ["emarking_enrolment"]
+│                   + model answers only when asked; otherwise record
+│                     `skipped`, with the reason, like commit submissions
 ├── grading.py      NEW pure: GRADE_BOUNDARIES, CATEGORIES, grade_for(), category_for()
 ├── marks.py        NEW pure: build the record from Exercises + a title lookup
 └── marks_step.py   NEW EmarkingMarksStep: enrolment fetch/cache, write, report
@@ -321,6 +330,10 @@ tests/
 ├── test_emarking_grading.py   NEW boundaries, exact-70.0, max=0, all four categories
 └── test_emarking_marks.py     NEW record assembly + the step end-to-end
 ```
+
+Plus `cli.py` (the `--model-answers` flag, with §9.3.1's help text
+verbatim) and the README's eMarking section, which currently says model
+answers are attempted and recorded as forbidden.
 
 Pipeline: `emarking-fetch` then `emarking-marks`, in the existing
 `emarking` subcommand. Run standalone, the marks step reads
@@ -365,6 +378,9 @@ module we never touched, and a module code absent from the enrolment.
   `personal_tutor` appear **nowhere** in any serialised output
 - `modules_helped` never contributes to scope
 - `enrolment()` has no username parameter and cannot be aimed elsewhere
+- **no model-answer request is issued by default**, and each is recorded
+  as `skipped` with a reason; `--model-answers` restores the attempt and
+  the 403-is-terminal handling
 - zero requests and **no proxy** when the enrolment cache is warm
 - a year cache without the `scope` marker is refetched (§8.1)
 
@@ -373,19 +389,14 @@ module we never touched, and a module code absent from the enrolment.
 1. **Module totals** — §6.1 leaves them out because `weight` isn't
    normalised. Leave it, compute only for the 28 modules that sum to 100,
    or investigate the other sums first?
-2. **Model answers, now that scope widens.** Every one is a 403 (45/45
-   probed ✅), and the wider scope takes them from 48 to **117 requests
-   that will all be refused** on a cold run. Worth making them opt-in
-   (`--model-answers`, default off) rather than spending 117 requests
-   being told no? The manifest already stops re-runs retrying them.
-3. **Exact colours** — hex values would need sampling from the site's
+2. **Exact colours** — hex values would need sampling from the site's
    CSS rather than guessing from the screenshot. Only worth it if you
    plan to render the record.
-4. **Exams and final module marks** aren't reachable; the endpoints that
+3. **Exams and final module marks** aren't reachable; the endpoints that
    would have them are staff routes. The enrolment record does carry
    `exam_contribution` / `coursework_contribution` per module, which is
    the weighting, not the result — include it?
-5. **`50007.1` / `50007.2` / `50007.3`** resolve to `Laboratory 2` and
+4. **`50007.1` / `50007.2` / `50007.3`** resolve to `Laboratory 2` and
    friends and appear as three modules. Leave as three?
 
 ## 11. Privacy note 🔒

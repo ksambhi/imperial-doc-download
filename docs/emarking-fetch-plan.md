@@ -213,15 +213,20 @@ entries, and optional courseworks that were set and not attempted
 (`Scala Recursive-Descent Parser (Optional)`). Those have specs worth
 having, which is the whole point.
 
-Cost of the wider scope ✅:
+Cost of the wider scope ✅. The right-hand column is what actually runs,
+since model answers are opt-in and off by default (§9.3.1) — they are all
+403s and none is worth requesting:
 
-| Year | exercises (old → new) | downloads (old → new) |
-|---|---|---|
-| 2223 | 66 → 110 | 166 → 237 |
-| 2324 | 44 → 67 | 84 → 117 |
-| 2425 | 16 → 31 | 40 → 65 |
-| 2526 | 20 → 45 | 52 → 100 |
-| **Total** | **146 → 253** | **342 → 519** |
+| Year | exercises (old → new) | downloads (old → new) | …excl. model answers |
+|---|---|---|---|
+| 2223 | 66 → 110 | 166 → 237 | 124 → **164** |
+| 2324 | 44 → 67 | 84 → 117 | 82 → **104** |
+| 2425 | 16 → 31 | 40 → 65 | 40 → **56** |
+| 2526 | 20 → 45 | 52 → 100 | 48 → **78** |
+| **Total** | **146 → 253** | 342 → 519 | 294 → **402** |
+
+So the change costs about **+108 real downloads**, and simultaneously
+removes 48 pointless ones from the current behaviour.
 
 Three rules that come with it:
 
@@ -457,6 +462,34 @@ Consequences:
   reported as a count, not as 45 warnings.
 - A recorded terminal outcome is **not retried on the next run** unless
   `--force`. Otherwise every re-run spends 45 requests being told no.
+
+#### 9.3.1 Decided: model answers are opt-in, and that's the right default
+
+The enrolment-based scope (§3.3.1) takes model answers from 48 to **117
+exercises**, every one of which would be a refusal. Spending 117 requests
+on a shared teaching server to be told "no" 117 times is not a good cold
+run.
+
+So: a `--model-answers` flag, **default off**. With it off they're
+recorded as `skipped` with a reason, exactly like commit-hash
+submissions; with it on, the existing 403-is-terminal handling applies
+unchanged.
+
+The framing in the help text matters, because this is not a limitation to
+apologise for — **it is the system working correctly**. Model answers are
+withheld from students on purpose: a tool that hoovered them up and
+archived them would be leaking next year's answers.
+
+```
+--model-answers   Also try to download model answers. Doesn't work, and
+                  probably shouldn't: every one comes back 403, and model
+                  answers escaping to students would compromise future
+                  years' coursework. Off by default — the requests would
+                  all be refused.
+```
+
+This also means the honest cold-run cost of the wider scope is **519 −
+117 = 402 downloads**, not 519.
 
 ### 9.4 Rate limits ✅ none, in the documentation or the headers
 
