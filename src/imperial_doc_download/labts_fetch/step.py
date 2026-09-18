@@ -18,7 +18,7 @@ from rich.console import Console
 from rich.table import Table
 
 from imperial_doc_download.labts_fetch.client import LabtsClient
-from imperial_doc_download.labts_fetch.models import Exercise, Milestone
+from imperial_doc_download.labts_fetch.models import Exercise, Milestone, load_labts_list
 from imperial_doc_download.labts_fetch.parsing import (
     ExerciseRow,
     parse_academic_years,
@@ -45,15 +45,25 @@ class LabtsFetchStep(Step):
 
     name = "labts-fetch"
 
-    def __init__(self, *, delay: float = 1.5, cache_dir: Path | str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        delay: float = 1.5,
+        cache_dir: Path | str | None = None,
+        force: bool = False,
+    ) -> None:
         # No network or filesystem I/O here (the cache directory is only
         # created once something is actually written to it): construction
         # must stay free of side effects so `--dry-run` (which never calls
         # `run()`) and pipeline setup remain instant and offline.
         self._delay = delay
         self._cache_dir = cache_dir
+        self._force = force
 
     def run(self, ctx: PipelineContext) -> None:
+        if self._reuse_previous_results(ctx):
+            return
+
         settings = ctx.settings
         if not settings.username or not settings.password:
             raise RuntimeError(
@@ -83,6 +93,34 @@ class LabtsFetchStep(Step):
         ssh_list_path = self._write_ssh_list(ctx, results)
         ctx.state["labts_exercises"] = results
         self._print_report(results, output_path, ssh_list_path)
+
+    def _reuse_previous_results(self, ctx: PipelineContext) -> bool:
+        """Short-circuit the whole step when an earlier run's output is there.
+
+        A full LabTS run is 4–6 minutes against a shared teaching server,
+        so when the later steps of the pipeline (cloning, ...) are what's
+        actually being re-run, reusing `labts-list.json` is both faster and
+        politer. `--force` ignores it and refetches.
+        """
+        output_path = ctx.output_dir / _OUTPUT_FILENAME
+        if self._force or not output_path.is_file():
+            return False
+
+        try:
+            results = load_labts_list(output_path)
+        except (KeyError, ValueError) as exc:
+            logger.warning("%s is unreadable (%s) — refetching from LabTS.", output_path, exc)
+            return False
+
+        total = sum(len(exercises) for exercises in results.values())
+        logger.info(
+            "Reusing %s: %d repositories across %d academic year(s). Pass --force to refetch.",
+            output_path,
+            total,
+            len(results),
+        )
+        ctx.state["labts_exercises"] = results
+        return True
 
     def _fetch_all_years(self, client: LabtsClient) -> dict[str, list[Exercise]]:
         landing_page = client.get_html("/labts")

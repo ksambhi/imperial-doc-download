@@ -9,7 +9,10 @@ output schema these `to_dict()` methods produce.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -46,6 +49,18 @@ class Milestone:
             "submission_state_raw": self.submission_state_raw,
             "submitted_revision": self.submitted_revision,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Milestone:
+        return cls(
+            id=data["id"],
+            name=data["name"],
+            year_page_label=data["year_page_label"],
+            submission_status=data["submission_status"],
+            submission_state=data["submission_state"],
+            submission_state_raw=data["submission_state_raw"],
+            submitted_revision=data["submitted_revision"],
+        )
 
 
 @dataclass
@@ -99,3 +114,36 @@ class Exercise:
             "submitted_revision": self.submitted_revision,
             "milestones": [m.to_dict() for m in self.milestones],
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Exercise:
+        """Rebuild an `Exercise` from its `to_dict()` form.
+
+        `has_submission`/`submitted_revision` are derived properties, so
+        they're deliberately ignored here and recomputed from the
+        milestones rather than trusted from the file.
+        """
+        return cls(
+            exercise_name=data["exercise_name"],
+            kind=data["kind"],
+            academic_year=data["academic_year"],
+            exercise_id=data["exercise_id"],
+            repository_id=data["repository_id"],
+            labts_url=data["labts_url"],
+            gitlab_url=data["gitlab_url"],
+            clone_urls=data["clone_urls"],
+            milestones=[Milestone.from_dict(m) for m in data["milestones"]],
+        )
+
+
+def load_labts_list(path: Path) -> dict[str, list[Exercise]]:
+    """Read a `labts-list.json` written by `labts_fetch` back into models.
+
+    Lets a later step (e.g. `gitlab_fetch`) run against the results of an
+    earlier LabTS run without refetching anything.
+    """
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return {
+        year: [Exercise.from_dict(item) for item in exercises]
+        for year, exercises in payload.items()
+    }

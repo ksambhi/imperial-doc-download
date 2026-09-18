@@ -110,3 +110,44 @@ def test_results_are_stashed_for_the_later_clone_step(results: PipelineContext) 
     stashed = results.state["labts_exercises"]
     assert set(stashed) == {"2324"}
     assert len(stashed["2324"]) == 20
+
+
+def test_a_second_run_reuses_the_repository_list_without_refetching(
+    results: PipelineContext,
+) -> None:
+    # No mock transport this time: if the step tried to talk to LabTS it
+    # would attempt a real request, and it has no credentials to do it with.
+    ctx = PipelineContext(output_dir=results.output_dir, settings=Settings())
+    LabtsFetchStep().run(ctx)
+
+    assert len(ctx.state["labts_exercises"]["2324"]) == 20
+
+
+def test_reusing_the_list_round_trips_every_field(results: PipelineContext) -> None:
+    ctx = PipelineContext(output_dir=results.output_dir, settings=Settings())
+    LabtsFetchStep().run(ctx)
+
+    before = results.state["labts_exercises"]["2324"]
+    after = ctx.state["labts_exercises"]["2324"]
+    assert [e.to_dict() for e in after] == [e.to_dict() for e in before]
+
+
+def test_force_refetches_even_when_the_list_is_already_there(
+    results: PipelineContext,
+) -> None:
+    ctx = PipelineContext(output_dir=results.output_dir, settings=Settings())
+
+    # Forcing means going back to LabTS, which needs credentials — so the
+    # step must complain about those rather than quietly reusing the file.
+    with pytest.raises(RuntimeError, match="IMPERIAL_USERNAME"):
+        LabtsFetchStep(force=True).run(ctx)
+
+
+def test_an_unreadable_list_is_refetched_rather_than_trusted(
+    results: PipelineContext,
+) -> None:
+    (results.output_dir / "labts-list.json").write_text("{not json", encoding="utf-8")
+    ctx = PipelineContext(output_dir=results.output_dir, settings=Settings())
+
+    with pytest.raises(RuntimeError, match="IMPERIAL_USERNAME"):
+        LabtsFetchStep().run(ctx)
