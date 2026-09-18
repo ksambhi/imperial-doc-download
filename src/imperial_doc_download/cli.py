@@ -1,12 +1,14 @@
 """Typer entry point for imperial-doc-download.
 
-One subcommand per Imperial system, each running its own pipeline:
-
+    imperial-doc-download all       [options]   <- everything, in one go
     imperial-doc-download labts     [options]
+    imperial-doc-download emarking  [options]
     imperial-doc-download scientia  [options]
 
-Eventually the root command will run all of them in parallel; that only
-makes sense once each pipeline works on its own, so it isn't wired up yet.
+`all` runs every implemented pipeline against one shared context, so the
+steps that can hand data to each other still do. It keeps going when a
+step fails — LabTS being down is no reason to skip eMarking as well —
+and reports what failed at the end.
 """
 
 from __future__ import annotations
@@ -17,13 +19,14 @@ from pathlib import Path
 import typer
 
 from imperial_doc_download import __version__
-from imperial_doc_download.config import Settings
+from imperial_doc_download.config import Settings, load_env_file
 from imperial_doc_download.emarking_fetch import EmarkingFetchStep, EmarkingMarksStep
 from imperial_doc_download.gitlab_fetch import GitlabFetchStep
 from imperial_doc_download.gitlab_fetch.cloning import DEFAULT_CLONE_TIMEOUT
 from imperial_doc_download.labts_fetch import LabtsFetchStep
 from imperial_doc_download.logging import setup_logging
 from imperial_doc_download.pipeline import Pipeline, PipelineContext, Step
+from imperial_doc_download.pipeline.runner import StepFailed
 from imperial_doc_download.scientia_fetch import ScientiaFetchStep
 
 app = typer.Typer(
@@ -101,6 +104,43 @@ _CLONE_TIMEOUT_OPTION = typer.Option(
 )
 
 
+_CACHE_DIR_OPTION = typer.Option(
+    None,
+    "--cache-dir",
+    help=(
+        "Cache fetched pages here and reuse them on later runs. "
+        "Makes re-runs near-instant; delete the directory to refetch."
+    ),
+)
+
+_EMARKING_DELAY_OPTION = typer.Option(
+    1.0,
+    "--delay",
+    min=0.0,
+    help="Seconds to wait after each API request. eMarking is a shared teaching server.",
+)
+
+_EMARKING_YEAR_OPTION = typer.Option(
+    None,
+    "--year",
+    help=(
+        "Only fetch these academic years (e.g. --year 2324 --year 2425). "
+        "By default every year the API advertises is checked."
+    ),
+)
+
+_EMARKING_MODEL_ANSWERS_OPTION = typer.Option(
+    False,
+    "--model-answers",
+    help=(
+        "Also try to download model answers. Doesn't work, and probably "
+        "shouldn't: every one comes back 403, and model answers escaping to "
+        "students would compromise future years' coursework. Off by default "
+        "— the requests would all be refused."
+    ),
+)
+
+
 def _version_callback(value: bool) -> None:
     if value:
         typer.echo(f"imperial-doc-download {__version__}")
@@ -110,6 +150,14 @@ def _version_callback(value: bool) -> None:
 @app.callback()
 def main(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging."),
+    env_file: Path = typer.Option(
+        Path(".env"),
+        "--env-file",
+        help=(
+            "Read credentials from this file if it exists. Parsed literally, "
+            "never through a shell. Anything already exported wins."
+        ),
+    ),
     version: bool = typer.Option(
         False,
         "--version",
@@ -119,8 +167,15 @@ def main(
     ),
 ) -> None:
     """imperial-doc-download: grab your data before your account gets nuked."""
+    # Before logging is set up, so the debug line naming the variables
+    # lands in the file too -- and before any subcommand resolves its
+    # `envvar=` options, which is what makes this work at all.
+    loaded = load_env_file(env_file)
     log_file = setup_logging(verbose=verbose)
-    logging.getLogger(__name__).debug("Logging to %s", log_file)
+    logger = logging.getLogger(__name__)
+    logger.debug("Logging to %s", log_file)
+    if loaded:
+        logger.info("Read %d setting(s) from %s.", len(loaded), env_file)
 
 
 def _run_pipeline(
@@ -128,6 +183,8 @@ def _run_pipeline(
     output_dir: Path,
     dry_run: bool,
     settings: Settings | None = None,
+    *,
+    continue_on_error: bool = False,
 ) -> None:
     """Run one system's pipeline against a freshly built context."""
     ctx = PipelineContext(
@@ -137,7 +194,21 @@ def _run_pipeline(
     )
     ctx.output_dir.mkdir(parents=True, exist_ok=True)
     try:
-        Pipeline(steps=steps).run(ctx)
+        Pipeline(steps=steps, continue_on_error=continue_on_error).run(ctx)
+    except StepFailed as exc:
+        # Everything that could run has run; say what didn't and exit
+        # non-zero so a script notices.
+        typer.secho(
+            f"\n{len(exc.failures)} step(s) failed:", fg=typer.colors.RED, err=True, bold=True
+        )
+        for name, error in exc.failures:
+            typer.secho(f"  ✗ {name}: {error}", fg=typer.colors.RED, err=True)
+        typer.secho(
+            "Everything else finished. Re-run to retry just the failures.",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
+        raise typer.Exit(1) from exc
     except NotImplementedError as exc:
         # A pipeline that's still a placeholder should say so plainly
         # rather than dumping a traceback at whoever ran it.
@@ -151,14 +222,65 @@ def _run_pipeline(
         raise typer.Exit(1) from exc
 
 
-_CACHE_DIR_OPTION = typer.Option(
-    None,
-    "--cache-dir",
-    help=(
-        "Cache fetched pages here and reuse them on later runs. "
-        "Makes re-runs near-instant; delete the directory to refetch."
-    ),
-)
+@app.command("all")
+def download_all(
+    output_dir: Path = _OUTPUT_DIR_OPTION,
+    dry_run: bool = _DRY_RUN_OPTION,
+    force: bool = _FORCE_OPTION,
+    cache_dir: Path | None = _CACHE_DIR_OPTION,
+    username: str | None = _USERNAME_OPTION,
+    doc_ssh_key: Path | None = _DOC_SSH_KEY_OPTION,
+    gitlab_ssh_key: Path | None = _GITLAB_SSH_KEY_OPTION,
+    jump_host: str | None = _JUMP_HOST_OPTION,
+    concurrency: int = _CONCURRENCY_OPTION,
+    clone_timeout: float = _CLONE_TIMEOUT_OPTION,
+    delay: float = _EMARKING_DELAY_OPTION,
+    model_answers: bool = _EMARKING_MODEL_ANSWERS_OPTION,
+) -> None:
+    """Download everything: LabTS, the GitLab repositories, and eMarking.
+
+    Runs all four implemented steps against one shared context, in the
+    order they depend on each other:
+
+    \b
+      1. labts-fetch     the repository list             → labts-list.json
+      2. gitlab-fetch    clone every repository          → <year>/gitlab/
+      3. emarking-fetch  specs, submissions, feedback    → <year>/<module>/emarking/
+      4. emarking-marks  the marks record and web page   → emarking-results.html
+
+    A failing step doesn't stop the rest — LabTS being down is no reason
+    to lose the eMarking half — and what failed is listed at the end.
+    Re-running retries only what's missing, so it's safe to just run it
+    again.
+
+    `-j/--concurrency` applies to both the clones and the eMarking
+    downloads. Be modest with it: the clones go through a shared shell
+    server and eMarking is a shared teaching server.
+
+    Needs IMPERIAL_USERNAME and IMPERIAL_PASSWORD, plus
+    IMPERIAL_GITLAB_SSH_KEY and IMPERIAL_DOC_SSH_KEY. A `.env` in the
+    working directory is read automatically.
+    """
+    _run_pipeline(
+        [
+            LabtsFetchStep(cache_dir=cache_dir, force=force),
+            _gitlab_step(force, concurrency, clone_timeout, jump_host),
+            EmarkingFetchStep(
+                force=force,
+                delay=delay,
+                concurrency=concurrency,
+                jump_host=jump_host,
+                model_answers=model_answers,
+            ),
+            EmarkingMarksStep(force=force, jump_host=jump_host),
+        ],
+        output_dir,
+        dry_run,
+        _settings(username, doc_ssh_key, gitlab_ssh_key),
+        # The whole point of this command is one invocation that gets as
+        # much as it can; aborting on the first problem defeats it.
+        continue_on_error=True,
+    )
 
 
 @app.command()
@@ -247,32 +369,6 @@ def _settings(
         doc_ssh_key=str(doc_ssh_key) if doc_ssh_key else None,
         gitlab_ssh_key=str(gitlab_ssh_key) if gitlab_ssh_key else None,
     )
-
-
-_EMARKING_DELAY_OPTION = typer.Option(
-    1.0,
-    "--delay",
-    min=0.0,
-    help="Seconds to wait after each API request. eMarking is a shared teaching server.",
-)
-_EMARKING_YEAR_OPTION = typer.Option(
-    None,
-    "--year",
-    help=(
-        "Only fetch these academic years (e.g. --year 2324 --year 2425). "
-        "By default every year the API advertises is checked."
-    ),
-)
-_EMARKING_MODEL_ANSWERS_OPTION = typer.Option(
-    False,
-    "--model-answers",
-    help=(
-        "Also try to download model answers. Doesn't work, and probably "
-        "shouldn't: every one comes back 403, and model answers escaping to "
-        "students would compromise future years' coursework. Off by default "
-        "— the requests would all be refused."
-    ),
-)
 
 
 @app.command()

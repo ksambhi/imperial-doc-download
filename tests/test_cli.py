@@ -127,3 +127,59 @@ def test_unimplemented_pipeline_reports_cleanly_without_a_traceback(tmp_path: Pa
     output = _output(result)
     assert "Not implemented yet" in output
     assert "Traceback" not in output
+
+
+class TestAllCommand:
+    """The one-invocation command that runs every pipeline."""
+
+    def test_dry_run_lists_all_four_steps_in_order(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["all", "--output-dir", str(tmp_path), "--dry-run"])
+        assert result.exit_code == 0, result.output
+        output = _output(result)
+        for name in ("labts-fetch", "gitlab-fetch", "emarking-fetch", "emarking-marks"):
+            assert name in output
+        assert output.index("labts-fetch") < output.index("gitlab-fetch")
+        assert output.index("emarking-fetch") < output.index("emarking-marks")
+
+    def test_it_is_listed_in_the_help(self) -> None:
+        result = runner.invoke(app, ["--help"])
+        assert result.exit_code == 0
+        assert "all" in _output(result)
+
+    def test_a_failing_step_does_not_stop_the_others(self, tmp_path: Path) -> None:
+        """Without credentials every step fails — but all four are tried."""
+        result = runner.invoke(app, ["all", "--output-dir", str(tmp_path)])
+
+        output = _output(result)
+        assert result.exit_code == 1
+        assert "step(s) failed" in output
+        # All four reported, not just the first.
+        for name in ("labts-fetch", "gitlab-fetch", "emarking-fetch", "emarking-marks"):
+            assert name in output
+        assert "Re-run to retry just the failures." in output
+
+    def test_reads_credentials_from_an_env_file(self, tmp_path: Path) -> None:
+        env = tmp_path / "creds.env"
+        # A password full of shell metacharacters, which is the case that
+        # sourcing the file would mangle.
+        env.write_text("IMPERIAL_USERNAME=jbloggs\nIMPERIAL_PASSWORD=a$b`c!d&e\n")
+
+        result = runner.invoke(
+            app,
+            ["--env-file", str(env), "all", "--output-dir", str(tmp_path), "--dry-run"],
+        )
+        assert result.exit_code == 0, result.output
+
+    def test_a_missing_env_file_is_not_an_error(self, tmp_path: Path) -> None:
+        result = runner.invoke(
+            app,
+            [
+                "--env-file",
+                str(tmp_path / "nope"),
+                "all",
+                "--output-dir",
+                str(tmp_path),
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output

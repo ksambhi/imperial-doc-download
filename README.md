@@ -298,15 +298,41 @@ assuming otherwise — the evidence is in `docs/emarking-fetch-plan.md` §9:
 
 ```bash
 uv sync
-
 uv run imperial-doc-download --help
-uv run imperial-doc-download labts --output-dir ./imperial-data --dry-run
+```
 
-export IMPERIAL_USERNAME=abc123
-export IMPERIAL_PASSWORD=...                       # or you'll be told what's missing up front
-export IMPERIAL_GITLAB_SSH_KEY=~/.ssh/doc_gitlab   # key registered with DoC GitLab
-export IMPERIAL_DOC_SSH_KEY=~/.ssh/doclab          # key for the shell servers
+Credentials come from the environment. Put them in a `.env` in the
+working directory and they're picked up automatically:
 
+```
+IMPERIAL_USERNAME=abc123
+IMPERIAL_PASSWORD=...
+IMPERIAL_GITLAB_SSH_KEY=/home/you/.ssh/doc_gitlab   # key registered with DoC GitLab
+IMPERIAL_DOC_SSH_KEY=/home/you/.ssh/doclab          # key for the shell servers
+```
+
+> **Don't `source` it.** That file is parsed literally, on purpose. If
+> your password contains shell metacharacters, `set -a; . ./.env` mangles
+> it — measured on this account: **17 characters in the file, 15 in the
+> environment**, and a `401` that looks exactly like an expired password.
+> Exporting the variables yourself works fine too, and anything already
+> exported wins over the file.
+
+**One command for everything:**
+
+```bash
+# LabTS list → clone every repo → eMarking files → marks record + web page
+uv run imperial-doc-download all -j 4
+```
+
+`all` runs the four steps against one shared context and **keeps going if
+one fails** — LabTS being down is no reason to lose the eMarking half.
+What failed is listed at the end and the exit code is non-zero. Re-run to
+retry just the failures; everything already downloaded is left alone.
+
+Or run the pipelines separately:
+
+```bash
 # fetch the repository list, then clone every repository
 uv run imperial-doc-download labts --output-dir ./imperial-data
 
@@ -330,25 +356,17 @@ uv run imperial-doc-download emarking --year 2526 --delay 2
 uv run imperial-doc-download emarking-marks
 ```
 
-> **Don't `source` your `.env`.** If your password contains shell
-> metacharacters, `set -a; . ./.env` silently truncates it and you get a
-> `401` that looks exactly like an expired password. Export the variables,
-> or have whatever launches the tool parse the file literally.
-
 There is one subcommand per Imperial system, each running its own
 pipeline:
 
 | Command | Status |
 |---|---|
+| `imperial-doc-download all` | implemented — **everything**, in one go |
 | `imperial-doc-download labts` | implemented — fetches the repository list, then clones |
 | `imperial-doc-download gitlab` | implemented — the clone half on its own |
 | `imperial-doc-download emarking` | implemented — coursework files, then the marks record |
 | `imperial-doc-download emarking-marks` | implemented — rebuilds the marks record offline |
 | `imperial-doc-download scientia` | placeholder |
-
-Eventually the root command will run them all in parallel. That only
-makes sense once each pipeline works on its own, so it isn't wired up
-yet — run them individually for now.
 
 `--dry-run` lists the steps that would run without downloading anything.
 `-v/--verbose` enables debug logging. `--force` ignores everything a
