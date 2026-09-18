@@ -135,10 +135,12 @@ def test_reusing_the_list_round_trips_every_field(results: PipelineContext) -> N
 def test_force_refetches_even_when_the_list_is_already_there(
     results: PipelineContext,
 ) -> None:
-    ctx = PipelineContext(output_dir=results.output_dir, settings=Settings())
+    # Credentials explicitly absent: forcing means going back to LabTS, so
+    # the step must complain about them rather than quietly reusing the file.
+    ctx = PipelineContext(
+        output_dir=results.output_dir, settings=Settings(username=None, password=None)
+    )
 
-    # Forcing means going back to LabTS, which needs credentials — so the
-    # step must complain about those rather than quietly reusing the file.
     with pytest.raises(RuntimeError, match="IMPERIAL_USERNAME"):
         LabtsFetchStep(force=True).run(ctx)
 
@@ -147,7 +149,9 @@ def test_an_unreadable_list_is_refetched_rather_than_trusted(
     results: PipelineContext,
 ) -> None:
     (results.output_dir / "labts-list.json").write_text("{not json", encoding="utf-8")
-    ctx = PipelineContext(output_dir=results.output_dir, settings=Settings())
+    ctx = PipelineContext(
+        output_dir=results.output_dir, settings=Settings(username=None, password=None)
+    )
 
     with pytest.raises(RuntimeError, match="IMPERIAL_USERNAME"):
         LabtsFetchStep().run(ctx)

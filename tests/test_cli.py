@@ -1,4 +1,3 @@
-import os
 import re
 from pathlib import Path
 
@@ -30,14 +29,8 @@ def _output(result: Result) -> str:
 def _isolate_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # setup_logging() writes to ./logs/ relative to the cwd — run each test
     # from a scratch directory so we don't litter the repo with log files.
+    # (IMPERIAL_* is cleared for every test in conftest.py.)
     monkeypatch.chdir(tmp_path)
-
-    # Typer reads credentials and key paths straight from the environment,
-    # so whatever the developer running the tests has exported must not
-    # leak in and change what these assert.
-    for name, _ in list(os.environ.items()):
-        if name.startswith("IMPERIAL_"):
-            monkeypatch.delenv(name)
 
 
 def test_version() -> None:
