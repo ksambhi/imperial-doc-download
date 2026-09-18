@@ -148,6 +148,47 @@ class EmarkingClient:
             raise EmarkingError(f"/years returned {response.status_code}.")
         return list(response.json())
 
+    async def enrolment(self, year: str) -> list[dict] | None:
+        """The modules we were enrolled in for `year`, from abc-api.
+
+        **This method deliberately takes no username.** It always filters
+        on the configured one, because the unfiltered form of this route
+        (`/{year}/students` with no `login`) is every student in the
+        department. Aiming it at anyone else is not an expressible call,
+        which is the same by-construction approach as GET-only.
+
+        Returns the raw `modules` array, `[]` for a year we weren't
+        enrolled in (the API answers `200 []` for those ✅), or `None`
+        when the year predates abc-api's records and it 500s.
+        """
+        response = await self._request(
+            f"{self._abc_base_url}/{year}/students",
+            params={"login": self._username},
+        )
+        if response.status_code in (500, 502):
+            logger.debug(
+                "Year %s: %d from abc-api — before its records.", year, response.status_code
+            )
+            return None
+        if response.status_code != 200:
+            raise EmarkingError(f"/{year}/students returned {response.status_code}.")
+
+        records = response.json()
+        if not records:
+            return []
+
+        # Belt and braces: the filter is a query parameter, so confirm the
+        # server honoured it before reading anything out of the record.
+        # If it ever hands back somebody else, that is a bug to report,
+        # not data to use.
+        ours = [r for r in records if r.get("login") == self._username]
+        if not ours:
+            raise EmarkingError(
+                f"/{year}/students?login=… returned {len(records)} record(s), none of them "
+                "ours. Refusing to read another student's enrolment."
+            )
+        return list(ours[0].get("modules") or [])
+
     async def exercises(self, year: str) -> list[dict] | None:
         """One year's exercises, or None if the API has nothing for it.
 
@@ -280,15 +321,19 @@ class EmarkingClient:
 
         return Download("downloaded", response.status_code, destination, written)
 
-    async def _request(self, url: str, *, auth: bool = True) -> httpx.Response:
+    async def _request(
+        self, url: str, *, auth: bool = True, params: dict[str, str] | None = None
+    ) -> httpx.Response:
         async with self._semaphore:
             self.request_count += 1
             logger.info("GET %s", url)
-            response = await self._request_with_retry(url, auth=auth)
+            response = await self._request_with_retry(url, auth=auth, params=params)
             await self._sleep()
             return response
 
-    async def _request_with_retry(self, url: str, *, auth: bool) -> httpx.Response:
+    async def _request_with_retry(
+        self, url: str, *, auth: bool, params: dict[str, str] | None = None
+    ) -> httpx.Response:
         last_exc: httpx.TransportError | None = None
 
         for attempt, backoff in enumerate((0.0, *_RETRY_DELAYS)):
@@ -305,7 +350,9 @@ class EmarkingClient:
                 # The one and only place this codebase issues a request to
                 # the eMarking API, and the method is a literal. Keep it
                 # that way -- see the module docstring.
-                response = await self._client.request("GET", url, auth=self._auth if auth else None)
+                response = await self._client.request(
+                    "GET", url, auth=self._auth if auth else None, params=params
+                )
             except httpx.TransportError as exc:
                 last_exc = exc
                 logger.warning("GET %s failed: %s", url, type(exc).__name__)

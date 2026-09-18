@@ -42,6 +42,12 @@ def _exercise(**overrides) -> dict:
         "supplementary_file": None,
         "model_answer": None,
         "mark": None,
+        "maximum_mark": 20,
+        "pass_mark": 40,
+        "weight": 50,
+        "end": "2024-11-06T19:00:00+00:00",
+        "extended_end": None,
+        "marks_published": "2024-12-02T11:04:19.442+00:00",
         "submissions": [],
         "feedback": None,
     }
@@ -112,10 +118,44 @@ YEAR_2324 = [
         supplementary_file="2023-02-01T00:00:00+00:00",
         mark={"mark": 55, "marker": "aa9120"},
     ),
-    # Not ours: another cohort's exercise, with no submission, feedback
-    # or mark. 473 of these come back in a real year.
-    _exercise(id=999, number=99, title="Someone else's coursework"),
+    # In an enrolled module, but we never touched it: no submission, no
+    # feedback, no mark. The old involvement-based rule dropped these;
+    # they're tutorials and optional courseworks whose specs are worth
+    # having (plan §3.3.1), so the enrolment-based scope keeps them.
+    _exercise(
+        id=306,
+        number=5,
+        type="TUT",
+        title="Linking and Loading",
+        maximum_mark=0,
+    ),
+    # Not ours: another cohort's module entirely. 473 of these come back
+    # in a real year and none is in our enrolment.
+    _exercise(
+        id=999,
+        module_code="99999",
+        number=99,
+        title="Someone else's coursework",
+    ),
 ]
+
+#: The abc-api student record. Personal fields are present precisely so
+#: the tests can assert none of them reaches disk.
+ENROLMENT = {
+    "login": "jbloggs",
+    "firstname": "Joe",
+    "lastname": "Bloggs",
+    "cid": "01234567",
+    "email": "joe.bloggs@example.ac.uk",
+    "personal_tutor": "a-staff-member",
+    "modules": [
+        {"code": "40001", "title": "Introduction to Computer Systems", "ects": 5.0},
+        {"code": "50007.1", "title": "Laboratory 2", "ects": 5.0},
+        {"code": "60099", "title": "A module with no exercises", "ects": 5.0},
+    ],
+    # Modules helped with are a teaching role, never scope (plan §3.3.1).
+    "modules_helped": [{"code": "99999", "title": "Someone else's coursework"}],
+}
 
 
 class FakeApi:
@@ -135,6 +175,13 @@ class FakeApi:
 
         if path == "/years":
             return httpx.Response(200, json=["2223", "2324"])
+        if path == "/2324/students":
+            # The route is only ever called filtered to our own login.
+            assert request.url.params.get("login") == "jbloggs"
+            return httpx.Response(200, json=[ENROLMENT])
+        if path == "/2223/students":
+            # A year we weren't enrolled in answers 200 [] (plan §9.5).
+            return httpx.Response(200, json=[])
         if path == "/me/2324/exercises":
             return httpx.Response(200, json=YEAR_2324)
         if path == "/me/2223/exercises":
@@ -297,7 +344,9 @@ class TestOutputLayout:
 
     def test_per_module_and_per_exercise_metadata_is_written(self, tmp_path: Path) -> None:
         module = json.loads((tmp_path / "2324/40001/emarking/exercises.json").read_text())
-        assert {e["number"] for e in module} == {1, 2, 3}
+        # Includes 5, the tutorial we never touched — that's the point of
+        # scoping by enrolment rather than by involvement.
+        assert {e["number"] for e in module} == {1, 2, 3, 5}
 
         exercise = json.loads(
             (tmp_path / "2324/40001/emarking/1-Data representation/exercise.json").read_text()
@@ -315,10 +364,14 @@ class TestManifest:
     def _run(self, tmp_path: Path, api: FakeApi) -> None:
         EmarkingFetchStep().run(_context(tmp_path))
 
-    def test_a_forbidden_model_answer_is_recorded_not_failed(self, tmp_path: Path) -> None:
+    def test_a_model_answer_is_recorded_but_never_requested(self, tmp_path: Path) -> None:
+        # They are a 403 every time, and that is the system working:
+        # releasing them would leak future years' answers. So by default
+        # we record without asking (plan §9.3.1).
         record = _records(tmp_path)["/2324/40001/exercises/2/model-answer"]
-        assert record["status"] == "forbidden"
+        assert record["status"] == "skipped"
         assert record["path"] is None
+        assert "--model-answers" in record["detail"]
 
     def test_a_commit_submission_is_recorded_as_skipped_with_its_hash(self, tmp_path: Path) -> None:
         record = _records(tmp_path)["/2324/40001/exercises/3/submissions/8483/file"]
@@ -364,7 +417,15 @@ class TestCachingAndForce:
         api.paths.clear()
 
         EmarkingFetchStep(years=["2223"]).run(_context(tmp_path))
-        assert "/me/2223/exercises" in api.paths
+        assert "/2223/students" in api.paths
+
+    def test_an_unenrolled_year_never_reaches_emarking(self, tmp_path: Path, api: FakeApi) -> None:
+        # abc-api answers 200 [] for a year we weren't enrolled in, so
+        # asking it first means we never provoke the 500 that
+        # /me/{year}/exercises returns for those years.
+        EmarkingFetchStep().run(_context(tmp_path))
+        assert "/2223/students" in api.paths
+        assert "/me/2223/exercises" not in api.paths
 
     def test_a_rerun_keeps_the_same_records(self, tmp_path: Path, api: FakeApi) -> None:
         EmarkingFetchStep().run(_context(tmp_path))
@@ -375,8 +436,7 @@ class TestCachingAndForce:
 
         assert set(before) == set(after)
         assert after["/2324/40001/exercises/1/spec"]["status"] == "cached"
-        # A settled 403 stays settled rather than being asked again.
-        assert after["/2324/40001/exercises/2/model-answer"]["status"] == "forbidden"
+        assert after["/2324/40001/exercises/2/model-answer"]["status"] == "skipped"
 
     def test_a_deleted_file_is_downloaded_again(self, tmp_path: Path, api: FakeApi) -> None:
         EmarkingFetchStep().run(_context(tmp_path))
@@ -397,9 +457,9 @@ class TestCachingAndForce:
 
         assert "/me/2324/exercises" in api.paths
         assert "/2324/40001/exercises/1/spec" in api.paths
-        # Even the settled 403 is asked about again, because that's what
-        # --force means.
-        assert "/2324/40001/exercises/2/model-answer" in api.paths
+        # ...but still not the model answer: --force means "redo the work",
+        # not "ignore the flag that says don't ask".
+        assert "/2324/40001/exercises/2/model-answer" not in api.paths
 
     def test_an_unreadable_manifest_is_ignored_rather_than_fatal(
         self, tmp_path: Path, api: FakeApi
@@ -471,3 +531,102 @@ class TestFailures:
 
 async def _no_sleep(_seconds: float) -> None:
     return None
+
+
+class TestEnrolmentScope:
+    """The scope change: enrolment, not involvement (plan §3.3.1)."""
+
+    def test_an_exercise_we_never_touched_is_still_downloaded(
+        self, tmp_path: Path, api: FakeApi
+    ) -> None:
+        # The whole point: a tutorial in a module we took, with no
+        # submission and no mark, still has a spec worth keeping.
+        spec = tmp_path / "2324/40001/emarking/5-Linking and Loading/40001_1_spec.pdf"
+        EmarkingFetchStep().run(_context(tmp_path))
+        assert spec.is_file()
+        assert _records(tmp_path)["/2324/40001/exercises/5/spec"]["status"] == "downloaded"
+
+    def test_a_module_we_were_not_enrolled_in_is_excluded(
+        self, tmp_path: Path, api: FakeApi
+    ) -> None:
+        EmarkingFetchStep().run(_context(tmp_path))
+        assert not (tmp_path / "2324/99999").exists()
+        assert not any("99999" in p for p in api.paths)
+
+    def test_modules_helped_never_becomes_scope(self, tmp_path: Path, api: FakeApi) -> None:
+        # 99999 is in modules_helped. Helping teach a module is not a
+        # licence to download its material.
+        EmarkingFetchStep().run(_context(tmp_path))
+        assert not any(r["module_code"] == "99999" for r in _records(tmp_path).values())
+
+    def test_the_enrolment_route_is_only_ever_called_for_us(
+        self, tmp_path: Path, api: FakeApi
+    ) -> None:
+        # The FakeApi asserts `login=jbloggs` on every call; this checks
+        # the call is actually made, so that assertion isn't vacuous.
+        EmarkingFetchStep().run(_context(tmp_path))
+        assert "/2324/students" in api.paths
+
+    def test_no_personal_details_from_the_enrolment_reach_disk(
+        self, tmp_path: Path, api: FakeApi
+    ) -> None:
+        EmarkingFetchStep().run(_context(tmp_path))
+        written = "\n".join(
+            p.read_text(errors="ignore") for p in tmp_path.rglob("*.json") if p.is_file()
+        )
+        for leak in ("01234567", "joe.bloggs@example.ac.uk", "a-staff-member", "Bloggs"):
+            assert leak not in written
+
+    def test_the_cached_enrolment_holds_only_code_and_title(
+        self, tmp_path: Path, api: FakeApi
+    ) -> None:
+        EmarkingFetchStep().run(_context(tmp_path))
+        cached = json.loads((tmp_path / "2324/emarking-enrolment.json").read_text())
+        assert all(set(m) == {"code", "title"} for m in cached)
+
+
+class TestYearCacheScopeMarker:
+    """§8.1: a cache from the old, narrower rule must not be trusted."""
+
+    def test_a_cache_without_a_scope_marker_is_refetched(
+        self, tmp_path: Path, api: FakeApi
+    ) -> None:
+        EmarkingFetchStep().run(_context(tmp_path))
+        cache = tmp_path / "2324/emarking-exercises.json"
+
+        # What an older version wrote: a bare list, holding only the
+        # exercises we'd worked on.
+        payload = json.loads(cache.read_text())["exercises"]
+        cache.write_text(json.dumps([e for e in payload if e["number"] != 5]))
+        api.paths.clear()
+
+        EmarkingFetchStep().run(_context(tmp_path))
+
+        assert "/me/2324/exercises" in api.paths
+        assert json.loads(cache.read_text())["scope"] == "enrolled-modules"
+        assert 5 in {e["number"] for e in json.loads(cache.read_text())["exercises"]}
+
+    def test_a_cache_with_a_foreign_scope_marker_is_refetched(
+        self, tmp_path: Path, api: FakeApi
+    ) -> None:
+        EmarkingFetchStep().run(_context(tmp_path))
+        cache = tmp_path / "2324/emarking-exercises.json"
+        payload = json.loads(cache.read_text())
+        cache.write_text(json.dumps({"scope": "something-else", "exercises": payload["exercises"]}))
+        api.paths.clear()
+
+        EmarkingFetchStep().run(_context(tmp_path))
+        assert "/me/2324/exercises" in api.paths
+
+
+class TestModelAnswers:
+    def test_the_flag_turns_them_back_on(self, tmp_path: Path, api: FakeApi) -> None:
+        EmarkingFetchStep(model_answers=True).run(_context(tmp_path))
+
+        assert "/2324/40001/exercises/2/model-answer" in api.paths
+        # And the 403-is-terminal handling still applies.
+        assert _records(tmp_path)["/2324/40001/exercises/2/model-answer"]["status"] == "forbidden"
+
+    def test_off_by_default_means_no_request(self, tmp_path: Path, api: FakeApi) -> None:
+        EmarkingFetchStep().run(_context(tmp_path))
+        assert "/2324/40001/exercises/2/model-answer" not in api.paths

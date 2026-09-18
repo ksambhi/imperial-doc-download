@@ -18,6 +18,7 @@ SSH SOCKS proxy on a shell server (`proxy.py`).
 
 from __future__ import annotations
 
+from imperial_doc_download.emarking_fetch.marks_step import EmarkingMarksStep
 from imperial_doc_download.emarking_fetch.step import EmarkingFetchStep
 
-__all__ = ["EmarkingFetchStep"]
+__all__ = ["EmarkingFetchStep", "EmarkingMarksStep"]

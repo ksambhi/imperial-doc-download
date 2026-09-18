@@ -18,7 +18,7 @@ import typer
 
 from imperial_doc_download import __version__
 from imperial_doc_download.config import Settings
-from imperial_doc_download.emarking_fetch import EmarkingFetchStep
+from imperial_doc_download.emarking_fetch import EmarkingFetchStep, EmarkingMarksStep
 from imperial_doc_download.gitlab_fetch import GitlabFetchStep
 from imperial_doc_download.gitlab_fetch.cloning import DEFAULT_CLONE_TIMEOUT
 from imperial_doc_download.labts_fetch import LabtsFetchStep
@@ -263,6 +263,16 @@ _EMARKING_YEAR_OPTION = typer.Option(
         "By default every year the API advertises is checked."
     ),
 )
+_EMARKING_MODEL_ANSWERS_OPTION = typer.Option(
+    False,
+    "--model-answers",
+    help=(
+        "Also try to download model answers. Doesn't work, and probably "
+        "shouldn't: every one comes back 403, and model answers escaping to "
+        "students would compromise future years' coursework. Off by default "
+        "— the requests would all be refused."
+    ),
+)
 
 
 @app.command()
@@ -276,17 +286,21 @@ def emarking(
     concurrency: int = _CONCURRENCY_OPTION,
     delay: float = _EMARKING_DELAY_OPTION,
     years: list[str] | None = _EMARKING_YEAR_OPTION,
+    model_answers: bool = _EMARKING_MODEL_ANSWERS_OPTION,
 ) -> None:
-    """Download coursework specs, submissions and feedback from eMarking.
+    """Download coursework files from eMarking, then write your marks record.
 
-    One request per academic year lists the exercises that are yours,
-    then each spec, submission, supplementary file and feedback file is
-    downloaded into `<output-dir>/<year>/<module-code>/emarking/`, with a
-    record of everything in `emarking-files.json`.
+    Two steps. `emarking-fetch` lists the exercises in every module you
+    were enrolled in and downloads each spec, submission, supplementary
+    file and feedback file into
+    `<output-dir>/<year>/<module-code>/emarking/`, recording what it did
+    in `emarking-files.json`. `emarking-marks` then writes
+    `emarking-marks.json` — every marked exercise with its deadline,
+    mark, percentage, grade and status colour — and costs no requests.
 
     Re-running is cheap: a file already on disk is left alone, and an
-    answer the API has settled (a missing artefact, or a model answer you
-    aren't allowed) is not asked about again. `--force` redoes everything.
+    answer the API has settled (a missing artefact, a year you weren't
+    enrolled in) is not asked about again. `--force` redoes everything.
 
     Read-only by construction — this client only ever issues GET, and
     only ever to your own data.
@@ -303,8 +317,32 @@ def emarking(
                 concurrency=concurrency,
                 jump_host=jump_host,
                 years=list(years) if years else None,
-            )
+                model_answers=model_answers,
+            ),
+            EmarkingMarksStep(force=force, jump_host=jump_host),
         ],
+        output_dir,
+        dry_run,
+        _settings(username, doc_ssh_key, None),
+    )
+
+
+@app.command("emarking-marks")
+def emarking_marks(
+    output_dir: Path = _OUTPUT_DIR_OPTION,
+    dry_run: bool = _DRY_RUN_OPTION,
+    username: str | None = _USERNAME_OPTION,
+    doc_ssh_key: Path | None = _DOC_SSH_KEY_OPTION,
+    jump_host: str | None = _JUMP_HOST_OPTION,
+) -> None:
+    """Rebuild `emarking-marks.json` from an earlier run, without downloading.
+
+    The marks record is a pure reshaping of what `emarking` already
+    wrote, so this normally makes no requests at all — handy after
+    changing how the record is built.
+    """
+    _run_pipeline(
+        [EmarkingMarksStep(jump_host=jump_host)],
         output_dir,
         dry_run,
         _settings(username, doc_ssh_key, None),

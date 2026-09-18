@@ -37,7 +37,13 @@ from imperial_doc_download.emarking_fetch.client import (
     Download,
     EmarkingClient,
 )
-from imperial_doc_download.emarking_fetch.models import Exercise, Submission, ours_only
+from imperial_doc_download.emarking_fetch.models import (
+    Exercise,
+    Module,
+    Submission,
+    enrolled_modules,
+    for_modules,
+)
 from imperial_doc_download.emarking_fetch.naming import exercise_directory, safe_component
 from imperial_doc_download.emarking_fetch.proxy import SocksProxy
 from imperial_doc_download.pipeline import PipelineContext, Step
@@ -46,6 +52,14 @@ logger = logging.getLogger(__name__)
 
 MANIFEST_FILENAME = "emarking-files.json"
 YEAR_CACHE_FILENAME = "emarking-exercises.json"
+ENROLMENT_CACHE_FILENAME = "emarking-enrolment.json"
+
+#: Stamped into the year cache so a re-run can tell which rule produced
+#: it. The scope widened from "exercises we worked on" to "exercises in
+#: modules we were enrolled in" (plan §3.3.1), and a cache written under
+#: the old rule is missing ~40% of the rows -- reusing it would look
+#: exactly like a successful run.
+CACHE_SCOPE = "enrolled-modules"
 
 #: Outcomes the API has settled. Re-asking would earn the same answer, so
 #: a re-run skips them unless `--force` (plan §9.3).
@@ -96,6 +110,7 @@ class EmarkingFetchStep(Step):
         concurrency: int = 1,
         jump_host: str | None = None,
         years: list[str] | None = None,
+        model_answers: bool = False,
     ) -> None:
         # Construction stays side-effect free (no I/O, no ssh) so
         # `--dry-run`, which never calls `run()`, stays instant and offline.
@@ -104,13 +119,20 @@ class EmarkingFetchStep(Step):
         self._concurrency = concurrency
         self._jump_host = jump_host
         self._only_years = years
-        #: Years the API had nothing for, carried across runs in the
-        #: manifest. 21 of the 25 advertised years answer 500 or 502
-        #: (plan §9.5), and re-probing them every run would mean causing
-        #: 21 deliberate server errors on a shared teaching box for an
-        #: answer we already have. `--force`, or naming a year with
-        #: `--year`, checks again.
+        #: Model answers are a 403 every time (45/45 probed), and that is
+        #: the system working: releasing them would leak future years'
+        #: answers. Off by default so a cold run doesn't spend 117
+        #: requests being refused (plan §9.3.1).
+        self._model_answers = model_answers
+        #: Years we weren't enrolled in, carried across runs in the
+        #: manifest so they aren't re-probed. `--force`, or naming a year
+        #: with `--year`, checks again -- which matters for the current
+        #: academic year, since it can gain data after an empty run.
         self._empty_years: set[str] = set()
+        #: Enrolled modules and scoped exercises per year, handed to the
+        #: marks step downstream.
+        self._modules: dict[str, list[Module]] = {}
+        self._exercises: dict[str, list[Exercise]] = {}
 
     def run(self, ctx: PipelineContext) -> None:
         settings = ctx.settings
@@ -133,6 +155,11 @@ class EmarkingFetchStep(Step):
         records = asyncio.run(self._run_async(ctx))
         self._write_manifest(ctx, records)
         ctx.state["emarking_files"] = records
+        # Handed to `emarking-marks` in the same pipeline so it needs no
+        # requests of its own; it falls back to reading these off disk
+        # when run on its own.
+        ctx.state["emarking_exercises"] = self._exercises
+        ctx.state["emarking_modules"] = self._modules
         self._print_report(records, ctx.output_dir / MANIFEST_FILENAME)
 
     async def _run_async(self, ctx: PipelineContext) -> list[FileRecord]:
@@ -179,54 +206,101 @@ class EmarkingFetchStep(Step):
                 logger.debug("Year %s had nothing for us last run — not asking again.", year)
                 continue
 
-            exercises = await self._exercises_for_year(ctx, client, year)
+            modules = await self._modules_for_year(ctx, client, year)
+            if not modules:
+                # abc-api answers `200 []` for a year we weren't enrolled
+                # in ✅, so this is a clean answer rather than an error —
+                # and asking it first means we never provoke the 500 that
+                # /me/{year}/exercises returns for those years.
+                self._empty_years.add(year)
+                continue
+
+            exercises = await self._exercises_for_year(ctx, client, year, modules)
             if not exercises:
                 self._empty_years.add(year)
                 continue
 
             self._empty_years.discard(year)
+            self._modules[year] = modules
+            self._exercises[year] = exercises
+            worked_on = sum(1 for e in exercises if e.is_ours)
             logger.info(
-                "Year %s: %d exercise(s) of ours across %d module(s).",
+                "Year %s: %d exercise(s) across %d enrolled module(s); "
+                "%d you worked on, %d marked.",
                 year,
                 len(exercises),
                 len({e.module_code for e in exercises}),
+                worked_on,
+                sum(1 for e in exercises if e.is_marked),
             )
             self._write_year_metadata(ctx, year, exercises)
             records += await self._fetch_year_artefacts(ctx, client, year, exercises, previous)
 
         return records
 
-    async def _exercises_for_year(
+    async def _modules_for_year(
         self, ctx: PipelineContext, client: EmarkingClient, year: str
-    ) -> list[Exercise]:
-        """This year's exercises of ours, from the cache or from the API."""
-        cache = ctx.output_dir / year / YEAR_CACHE_FILENAME
+    ) -> list[Module]:
+        """Modules we were enrolled in, from the cache or from abc-api.
+
+        Only the code and title are ever written out — the record this
+        comes from also carries our cid, email, name and personal tutor
+        (plan §3.3.1).
+        """
+        cache = ctx.output_dir / year / ENROLMENT_CACHE_FILENAME
         if not self._force and cache.is_file():
             try:
                 payload = json.loads(cache.read_text(encoding="utf-8"))
             except json.JSONDecodeError:
-                logger.warning("%s is unreadable — refetching year %s.", cache, year)
+                logger.warning("%s is unreadable — refetching it.", cache)
             else:
+                return enrolled_modules(payload)
+
+        payload = await client.enrolment(year)
+        if not payload:
+            return []
+
+        modules = enrolled_modules(payload)
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(
+            json.dumps([{"code": m.code, "title": m.title} for m in modules], indent=2),
+            encoding="utf-8",
+        )
+        return modules
+
+    async def _exercises_for_year(
+        self,
+        ctx: PipelineContext,
+        client: EmarkingClient,
+        year: str,
+        modules: list[Module],
+    ) -> list[Exercise]:
+        """This year's exercises in our modules, from the cache or the API."""
+        cache = ctx.output_dir / year / YEAR_CACHE_FILENAME
+        if not self._force and cache.is_file():
+            cached = read_year_cache(cache, year)
+            if cached is not None:
                 logger.info("Reusing %s (pass --force to refetch).", cache)
-                return ours_only(payload)
+                return for_modules(cached, modules)
 
         payload = await client.exercises(year)
         if payload is None:
             return []
 
-        exercises = ours_only(payload)
+        exercises = for_modules(payload, modules)
         logger.debug(
-            "Year %s: %d exercise(s) returned, %d of them ours.",
+            "Year %s: %d exercise(s) returned, %d in our %d enrolled module(s).",
             year,
             len(payload),
             len(exercises),
+            len(modules),
         )
         if not exercises:
             return []
 
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(
-            json.dumps([e.raw for e in exercises], indent=2),
+            json.dumps({"scope": CACHE_SCOPE, "exercises": [e.raw for e in exercises]}, indent=2),
             encoding="utf-8",
         )
         return exercises
@@ -270,6 +344,9 @@ class EmarkingFetchStep(Step):
             # itself is what `gitlab_fetch` clones.
             for submission in exercise.commit_submissions:
                 records.append(_skipped_commit(exercise, submission))
+
+            if exercise.model_answer and not self._model_answers:
+                records.append(_skipped_model_answer(exercise))
 
             for artefact in self._artefacts_for(ctx, exercise):
                 cached = self._reuse(artefact, exercise, previous, ctx.output_dir)
@@ -324,7 +401,7 @@ class EmarkingFetchStep(Step):
 
         if exercise.spec:
             artefacts.append(_Artefact("spec", f"{base}/spec", directory, fallback_stem="spec"))
-        if exercise.model_answer:
+        if exercise.model_answer and self._model_answers:
             artefacts.append(
                 _Artefact(
                     "model-answer",
@@ -535,6 +612,60 @@ def _record(
         path=path,
         size=size,
         detail=detail,
+    )
+
+
+def read_year_cache(cache: Path, year: str) -> list[dict] | None:
+    """The cached year response, or None if it can't be trusted.
+
+    A cache written before the scope widened is a bare JSON list and
+    holds only the exercises we worked on. Honouring it would quietly
+    drop the tutorials and optional courseworks the new scope exists to
+    collect, and the run would look entirely successful — so an unmarked
+    or mismatched cache is refetched, not reused.
+    """
+    try:
+        payload = json.loads(cache.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        logger.warning("%s is unreadable — refetching year %s.", cache, year)
+        return None
+
+    if not isinstance(payload, dict):
+        logger.info(
+            "%s predates the enrolment-based scope, so it's missing exercises from "
+            "your modules that you didn't submit to — refetching year %s.",
+            cache,
+            year,
+        )
+        return None
+    if payload.get("scope") != CACHE_SCOPE:
+        logger.info(
+            "%s was written with scope %r, not %r — refetching year %s.",
+            cache,
+            payload.get("scope"),
+            CACHE_SCOPE,
+            year,
+        )
+        return None
+    return list(payload.get("exercises") or [])
+
+
+def _skipped_model_answer(exercise: Exercise) -> FileRecord:
+    """Recorded, not requested — and not a failure.
+
+    Every model answer is a 403 (45/45 probed), and that is eMarking
+    working as intended rather than something to route around: model
+    answers are withheld from students so they can't leak into the next
+    year's coursework.
+    """
+    return FileRecord(
+        year=exercise.year,
+        module_code=exercise.module_code,
+        number=exercise.number,
+        kind="model-answer",
+        url=(f"/{exercise.year}/{exercise.module_code}/exercises/{exercise.number}/model-answer"),
+        status="skipped",
+        detail="not released to students (always 403) — pass --model-answers to try anyway",
     )
 
 
