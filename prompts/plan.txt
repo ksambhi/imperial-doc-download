@@ -1,0 +1,51 @@
+Hi Claude, I want to continue work on this project we started earlier - we did the labts pipeline, I want to create a new step that follows it, the gitlab pipeline, that already has a placeholder.
+
+The gitlab pipelines takes the repos creates by the labts step, and attempts to clone them.
+
+Inputs:
+1. Labts piepline output
+2. Env vars (which can also be CLI args, use typer's appropriate constrat):
+	- IMPERIAL_DOC_SSH_KEY=path (path to SSH Key for Imperial Deparment of COmputing (DoC) shell server)
+	- IMPERIAL_GITLAB_SSH_KEY=path (path to SSH Key for Imperial GitLab server)
+	- IMPERIAL_USERNAME=username (username for the Imperial DoC shell server)
+
+Output:
+Repos should be cloned using to folder output_dir/academic_year/gitlab/milestone_name/, e.g. results/2324/gitlab/pintos/
+
+Example LabTS output is in results/labts-list.json (note it is quite long!)
+
+Clone as follows:
+1. Attempt to clone using the SSH link directly, using the SSH key from IMPERIAL_GITLAB_SSH_KEY
+2. If that fails, you will need to clone from gitolite which is a bit more involved
+
+# Cloning from gitolite
+gitolite is behind the doc firewall, and so we need to use Proxy Jump to get to it.
+1. Rewrite the SSH Url to the gitolite one, by replacing the start with gitolite@gitolite.doc.ic.ac.uk. E.g. git@gitlab.doc.ic.ac.uk:lab2526_spring/70010_DL_CW_2_kss22.git becomes gitolite@gitolite.doc.ic.ac.uk:lab2526_spring/70010_DL_CW_2_kss22.git
+2. Clone by proxyjumping through sftp.doc.ic.ac.uk
+
+Keys wise:
+1. For the gitlab clone, use the key from IMPERIAL_GITLAB_SSH_KEY
+2. For the gitolite clone, access sftp.doc.ic.ac.uk using IMPERIAL_DOC_SSH_KEY and the username IMPERIAL_USERNAME (see the python file, this is already an option the user has to provide for labts), and then use the key from IMPERIAL_GITLAB_SSH_KEY to access gitolite.
+
+If this were an SSH config, it would look like this:
+
+```
+Host sftp.doc.ic.ac.uk
+	User ${IMPERIAL_USERNAME} # filled in as needed
+	HostName shell5.doc.ic.ac.uk
+	IdentityFile ${IMPERIAL_DOC_SSH_KEY} # filled in as needed
+Host gitolite.doc.ic.ac.uk
+  HostName gitolite.doc.ic.ac.uk
+  IdentityFile ${IMPERIAL_GITLAB_SSH_KEY} # filled in as needed
+  ProxyJump sftp.doc.ic.ac.uk
+```
+
+You must not alter the user's SSH config file, but you can use the above as a reference for how to set up the SSH connection. If you can not find a way to do the clone without modifying the user's SSH config file, please let me know and we can discuss alternatives. Note that my computer already has the above in my SSH config file, but this tool might be used by users who haven't set up their SSH config file like that (but they will have the SSH keys).
+
+
+# What to do
+Write the gitlab pipeline, testing as you go along until it works. At the end the current CLI subcommand `labts` should run the labts step AND the gitlab step one after another. If a cached result for labts is available, use that unless --force is passed. If a cached result for gitlab is available, use that unless --force is passed.
+
+# Misc note
+- Do not attempt to hack any system. If you find something that looks like a bug you could exploit, stop and alert me: I will likely either let you know it’s not a bug, tell you to stop and do something else or get you to write me up a bug report I can send to the DoC.
+- Have the code clone sequentially for now, but allow us to adapt it to clone in parallel later if we want to - given this is likely to be heavily I/O bound, I Imagine our concurrency model wit be async.await but feel free to suggest a different approach if you think it would be better and discuss it with me
