@@ -1,82 +1,58 @@
 # imperial-doc-download
 
 Download your data from Imperial College's Department of Computing before
-your account is deleted at graduation.
+your account is deleted. Created using Claude Code in about a day (included in the background whilst I was abroad).
 
-Imperial DoC keeps your degree spread across several systems, and most of
-it disappears when your account does. This tool walks each of them and
-leaves you with a self-contained folder: your coursework, your git
-history, your marks, your feedback, and the teaching materials from every
-module you took.
+This system will use the Scientia APIs to download the following:
+1. Your coursework submissions and feedback from Scientia
+2. Your marks from Scientia, presented in a single HTML page for offline viewing, and JSON copies as well
+3. Your LabTS submissions
+4. Your GitLab repositories _that were submitted on LabTS_, including all branches and tags. Note that some of these would have been archived from GitLab to the deparmtner gitolite, so this tool will also attempt to clone from gitolite if the GitLab clone fails.
 
-A `uv`-managed CLI. Python 3.12. **Read-only by construction** — see
-[Safety](#safety).
+Note that it do not download your complete GitLab record, as once repos were archived there was no apparent way of listing them; the best we can do is get their old URLs from LabTS, rewrite them for the archive gitolite server, and clone from there. 
 
----
+A `uv`-managed CLI. Python 3.12.
 
-## What you get
+## Pre-requisites
+1. Python 3.12
+2. `uv` (https://docs.astral.sh/uv/)
+3. Your Imperial shortcode and password
+4. An SSH key setup for the DoC shell server (see https://www.imperial.ac.uk/computing/people/csg/guides/remote-access/ssh/)
+5. An SSH key setup for DoC GitLab.
 
-| System | What it saves |
-|---|---|
-| **LabTS** | the list of every exercise and the GitLab repository behind it |
-| **DoC GitLab / gitolite** | a full clone of every repository, including refs a normal clone leaves behind |
-| **eMarking** | every coursework spec, your submissions, supplementary files and marker feedback |
-| **eMarking marks** | your complete marks record as JSON, plus an offline web page that reproduces the results page |
-| **Materials** | lecture notes, slides and handouts for every module you were enrolled in |
+The Scientia APIs used live behind the departmental firewall, so the tool opens an SSH SOCKS tunnel through a shell server for you. You don't need to be on the VPN, but you do need that shell-server key to work.
 
-Measured on one real four-year account: **65 repositories, ~250
-coursework artefacts, 138 marked exercises and 1.75 GB of teaching
-materials.** A complete run takes roughly 40–55 minutes and produces
-about 5.5 GB.
-
----
-
-## Requirements
-
-- **Python 3.12** and [`uv`](https://docs.astral.sh/uv/)
-- **An Imperial DoC account** that still works — run this *before* you
-  graduate, not after
-- **Two SSH keys**, both of which you should already have if you've used
-  DoC's machines:
-  - one registered with DoC GitLab
-  - one for the DoC shell servers (`shell1-5.doc.ic.ac.uk`)
-- **`git`** and **OpenSSH** on your `PATH`
-- Roughly **6 GB of free disk** for a full run
-
-Most of DoC's APIs live behind the departmental firewall, so the tool
-opens an SSH SOCKS tunnel through a shell server for you. You don't need
-to be on the VPN, but you do need that shell-server key to work.
-
----
-
-## Setup
-
+## Quick Start
+### Installation
 ```bash
-git clone <this repository>
+git clone https://github.com/ksambhi/imperial-doc-download
 cd imperial-doc-download
 uv sync
+```
+
+## Run the download
+```bash
+export IMPERIAL_USERNAME=abc123
+export IMPERIAL_PASSWORD=your-college-password
+
+# Private keys for the DoC shell server and GitLab, respectively
+# (If you used my SSH script from https://github.com/ksambhi/some-tools/blob/master/ssh.sh, your SSH key will be at ~/.ssh/doclab_ecdsa)
+# (if your keys have passphrases, see the note after)
+export IMPERIAL_GITLAB_SSH_KEY=/home/you/.ssh/id_rsa
+export IMPERIAL_DOC_SSH_KEY=/home/you/.ssh/id_rsa
+
 uv run imperial-doc-download --help
+uv run imperial-doc-download all \
+  --output-dir ./results \
+  --cache-dir ./results/.cache
 ```
 
-### Credentials
+**Re-running is safe and cheap.** Every step reuses what's already on
+disk, so if a run is interrupted, run it again and it will pick up where it stopped. Nothing already downloaded is fetched twice.
 
-Create a `.env` file in the working directory. It's picked up
-automatically:
+Note that this process may take a while, especially if your GitLab repositories are large. The `--cache-dir` option will cache the LabTS pages (used to work out what GitLab repos to fetch), so re-running the tool will be much faster.
 
-```
-IMPERIAL_USERNAME=abc123
-IMPERIAL_PASSWORD=your-college-password
-IMPERIAL_GITLAB_SSH_KEY=/home/you/.ssh/doc_gitlab
-IMPERIAL_DOC_SSH_KEY=/home/you/.ssh/doclab
-```
-
-Exporting these as environment variables works too, and anything already
-exported wins over the file. If your keys have passphrases, either load
-them into your `ssh-agent` first or set
-`IMPERIAL_GITLAB_SSH_KEY_PASSPHRASE` /
-`IMPERIAL_DOC_SSH_KEY_PASSPHRASE`. Those two are environment-only on
-purpose — a passphrase passed as a command-line flag ends up in your
-shell history and in `ps` output.
+The environment variables can also be set in a `.env` file in the working directory, which is automatically picked up by the tool.
 
 > ### ⚠️ Don't `source` your `.env`
 >
@@ -87,33 +63,22 @@ shell history and in `ps` output.
 > that looks exactly like an expired password. Let the tool read the
 > file, or export the variables yourself.
 
----
-
-## Quick start
-
-```bash
-# everything except teaching materials
-uv run imperial-doc-download all
-
-# ...and the ~1.75 GB of materials too
-uv run imperial-doc-download all --materials
-```
-
-That's it. Output lands in `./imperial-data` unless you pass
-`--output-dir`.
-
-**Re-running is safe and cheap.** Every step reuses what's already on
-disk, so if a run is interrupted — or one system is down — just run it
-again and it picks up where it stopped. Nothing already downloaded is
-fetched twice.
-
-Start with a dry run if you want to see the plan first:
-
-```bash
-uv run imperial-doc-download all --dry-run
-```
+### Note on SSH keys with passphrases
+If your keys have passphrases, either load them into your `ssh-agent` first or set `IMPERIAL_GITLAB_SSH_KEY_PASSPHRASE` / `IMPERIAL_DOC_SSH_KEY_PASSPHRASE`. Those two are environment-only on purpose - a passphrase passed as a command-line flag ends up in your shell history and in `ps` output.
 
 ---
+
+## What you get
+
+| System | What it saves |
+|---|---|
+| **LabTS** | the list of every exercise and the GitLab repository behind it |
+| **DoC GitLab / gitolite** | a full clone of every repository, including refs a normal clone leaves behind |
+| **emarking** | every coursework spec, your submissions, supplementary files and marker feedback |
+| **emarking marks** | your complete marks record as JSON, plus an offline web page that reproduces the Scientia results page for viewing |
+
+---
+
 
 ## What lands on disk
 
@@ -125,7 +90,6 @@ imperial-data/
 ├── emarking-files.json          every coursework file, and what happened to it
 ├── emarking-marks.json          your complete marks record
 ├── emarking-results.html        ← open this one
-├── materials-files.json         every module's materials, and what was extracted
 └── 2425/
     ├── emarking-enrolment.json  the modules you took that year
     ├── gitlab/
@@ -138,15 +102,10 @@ imperial-data/
         │       ├── 60019_1_spec.pdf
         │       ├── submissions/133660/coursework.pdf
         │       └── feedback/304338/abc123.pdf
-        └── materials/
-            ├── Lectures/(0) Lecture 1-Introduction.pdf
-            └── Practicals/(1) Practical 2-Sensors.pdf
 ```
 
 **Open `emarking-results.html` first.** It's a self-contained
-reconstruction of the eMarking coursework-results page — every module,
-every mark and grade, with a dark/light toggle and tabs per academic
-year. The Feedback links download the PDF saved next to the page, so it
+reconstruction of the Scientia coursework-results page, with a dark/light toggle and tabs per academic year. The Feedback links download the PDF saved next to the page, so it
 keeps working offline and after your account is gone.
 
 Everything here is personal data. The output directory is gitignored;
@@ -155,6 +114,7 @@ keep it that way.
 ---
 
 ## The systems
+Documentation by Claude Code.
 
 ### LabTS and GitLab
 
@@ -177,8 +137,7 @@ clone` isn't enough. Each clone also gets:
 
 Old years' repositories are no longer served by GitLab, so the tool falls
 back to `gitolite.doc.ic.ac.uk`, which still has them. That's behind the
-firewall, so it proxy-jumps through a shell server — which is what the
-second SSH key is for. Without it, repositories GitLab still serves clone
+firewall, so it proxy-jumps through the shell servers - hence the need for your SSH key. Without it, repositories GitLab still serves clone
 fine and the rest fail, and the run tells you which.
 
 **Your `~/.ssh/config` is never read or modified.** Everything goes into
@@ -201,10 +160,8 @@ courseworks you never attempted — their specs are worth keeping too.
 
 Some things worth knowing:
 
-- **Model answers are skipped by default.** Every one returns `403`, and
-  that's the system working rather than something to route around:
-  releasing them would leak future years' answers. `--model-answers`
-  asks anyway, if you want the refusals on record.
+- **Model answers are skipped by default.** Every one returned `403` during testing, and
+  the author decided to avoid investigating further as releasing them would leak future years' answers. `--model-answers` asks anyway, if you want the refusals on record.
 - **Submissions that are git commits aren't downloaded here** — that's
   what the GitLab clones are for. They're recorded so you can see the
   link.
@@ -216,13 +173,11 @@ Some things worth knowing:
 ### Your marks record
 
 `emarking-marks.json` is your complete record: every marked exercise,
-across every year, with its deadline, mark, percentage, grade, pass/fail
-and status colour, grouped by module.
+across every year, with its deadline, mark, percentage, grade, pass/fail, grouped by module.
 
-The grade and the colour are **computed** — neither is in the API,
+The grade are **computed** — it is not in the API,
 because the real page works them out in the browser. The grade
-boundaries (`A*` ≥ 80, `A` ≥ 70, …) and the colour legend are written
-into the file itself, so the record explains its own vocabulary.
+boundaries (`A*` ≥ 80, `A` ≥ 70, …) is written into the file itself, so the record explains its own vocabulary.
 
 Two things that look wrong until you check them:
 
@@ -230,30 +185,11 @@ Two things that look wrong until you check them:
   138 marked exercises had a `pass_mark` larger than their own
   `maximum_mark` — 40, on something marked out of 10. Comparing it
   against the raw mark reports failures that never happened.
-- **"Unassessed" means zero-weighted, not unmarked.** A progress test can
-  be submitted, marked 10/10 and graded `A*` and still be unassessed,
-  because it contributes nothing to the module mark. The results page
-  colours those brown.
+- Colours are based on the same ones used by Scientia itself
 
 This step makes no network requests at all — it reshapes what's already
 been downloaded. `imperial-doc-download emarking-marks` rebuilds both the
 JSON and the web page offline.
-
-### Materials
-
-One zip of teaching materials per module, extracted into
-`<year>/<module>/materials/` beside that module's coursework.
-
-The zip is **deleted once it has extracted cleanly** — the full set is
-~1.75 GB and keeping both halves doubles that. `--keep-zip` retains them.
-A failed extraction keeps its zip so a retry doesn't re-download it.
-
-This step needs the enrolment list, which the `emarking` step fetches and
-caches — so run `emarking` (or `all`) first, or pass `--year`.
-
-Measured: **46 zips, 1.75 GB, about 21 minutes** at `-j 1`. Four modules
-published nothing and answer `404`, which is recorded rather than treated
-as an error.
 
 ---
 
@@ -266,7 +202,6 @@ as an error.
 | `gitlab` | the clone half on its own, from an earlier run's list |
 | `emarking` | coursework files, then the marks record and web page |
 | `emarking-marks` | rebuild the marks record and page offline |
-| `materials` | lecture notes and handouts |
 | `scientia` | not implemented yet |
 
 ### Common options
@@ -297,8 +232,9 @@ uv run imperial-doc-download --verbose --env-file ~/creds.env all
 
 In `all`, each pipeline has a switch: `--skip-labts`, `--skip-gitlab`,
 `--skip-emarking`, `--skip-materials`. **Materials is the only one
-skipped by default** — at ~1.75 GB it's an order of magnitude more than
-everything else combined, so `--materials` opts in.
+skipped by default** - at ~1.75 GB it's an order of magnitude more than
+everything else combined, so `--materials` opts in. Plus I am not sure if it would violate
+acceptable use of the API to download all the materials, so I have left it out by default.
 
 `-j/--concurrency` defaults to your machine's CPU count. The HTTP
 pipelines still wait `--delay` after each request, so raising it raises
@@ -357,7 +293,7 @@ later steps consume the earlier ones' output.
 
 ### Safety
 
-These are not read-only systems. Between them, the APIs this tool talks
+Scientia is not a read-only systems. Between them, the APIs this tool talks
 to can submit coursework, edit feedback, write marks, and replace a
 lecturer's teaching files. So:
 
