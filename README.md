@@ -1,7 +1,8 @@
 # imperial-doc-download
+![Coursework marks overview](./docs/image.png)
 
 Download your data from Imperial College's Department of Computing before
-your account is deleted. Created using Claude Code in about a day (included in the background whilst I was abroad).
+your account is deleted. Created using Claude Code in about a day (including running in the background whilst I was abroad).
 
 This system will use the Scientia APIs to download the following:
 1. Your coursework submissions and feedback from Scientia
@@ -9,7 +10,7 @@ This system will use the Scientia APIs to download the following:
 3. Your LabTS submissions
 4. Your GitLab repositories _that were submitted on LabTS_, including all branches and tags. Note that some of these would have been archived from GitLab to the deparmtner gitolite, so this tool will also attempt to clone from gitolite if the GitLab clone fails.
 
-Note that it do not download your complete GitLab record, as once repos were archived there was no apparent way of listing them; the best we can do is get their old URLs from LabTS, rewrite them for the archive gitolite server, and clone from there. 
+Note that it will **not** download your complete GitLab record, as once old repos are (automatically!) archived there is no apparent way of listing them; the best we can do is get their old URLs from LabTS, rewrite them for the archive gitolite server, and clone from there. 
 
 A `uv`-managed CLI. Python 3.12.
 
@@ -36,15 +37,16 @@ export IMPERIAL_USERNAME=abc123
 export IMPERIAL_PASSWORD=your-college-password
 
 # Private keys for the DoC shell server and GitLab, respectively
-# (If you used my SSH script from https://github.com/ksambhi/some-tools/blob/master/ssh.sh, your SSH key will be at ~/.ssh/doclab_ecdsa)
-# (if your keys have passphrases, see the note after)
+# (If you used my SSH script from https://github.com/ksambhi/some-tools/blob/master/ssh.sh,
+# your SSH key will be at ~/.ssh/doclab_ecdsa)
+# (if your keys have passphrases, see the note below)
 export IMPERIAL_GITLAB_SSH_KEY=/home/you/.ssh/id_rsa
 export IMPERIAL_DOC_SSH_KEY=/home/you/.ssh/id_rsa
 
 uv run imperial-doc-download --help
 uv run imperial-doc-download all \
-  --output-dir ./results \
-  --cache-dir ./results/.cache
+  --output-dir ./imperial-data \
+  --cache-dir ./imperial-data/.cache
 ```
 
 **Re-running is safe and cheap.** Every step reuses what's already on
@@ -59,9 +61,8 @@ The environment variables can also be set in a `.env` file in the working direct
 > The tool parses that file literally, and deliberately so. If your
 > password contains shell metacharacters, `set -a; . ./.env` silently
 > mangles it. On the account this was built against that meant **17
-> characters in the file and 15 in the environment**, producing a `401`
-> that looks exactly like an expired password. Let the tool read the
-> file, or export the variables yourself.
+> characters in the file and 15 in the environment**, producing a `401`.
+> Let the tool read the file, or export the variables yourself.
 
 ### Note on SSH keys with passphrases
 If your keys have passphrases, either load them into your `ssh-agent` first or set `IMPERIAL_GITLAB_SSH_KEY_PASSPHRASE` / `IMPERIAL_DOC_SSH_KEY_PASSPHRASE`. Those two are environment-only on purpose - a passphrase passed as a command-line flag ends up in your shell history and in `ps` output.
@@ -72,10 +73,10 @@ If your keys have passphrases, either load them into your `ssh-agent` first or s
 
 | System | What it saves |
 |---|---|
-| **LabTS** | the list of every exercise and the GitLab repository behind it |
-| **DoC GitLab / gitolite** | a full clone of every repository, including refs a normal clone leaves behind |
-| **emarking** | every coursework spec, your submissions, supplementary files and marker feedback |
-| **emarking marks** | your complete marks record as JSON, plus an offline web page that reproduces the Scientia results page for viewing |
+| **LabTS** | The list of every exercise and the GitLab repository behind it |
+| **DoC GitLab / gitolite** | A full clone of every repository, including refs a normal clone leaves behind |
+| **emarking** | Every coursework spec, your submissions, supplementary files and marker feedback |
+| **emarking marks** | Your complete marks record as JSON, plus an offline web page that reproduces the Scientia results page for viewing |
 
 ---
 
