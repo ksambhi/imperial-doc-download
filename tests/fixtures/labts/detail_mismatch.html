@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en" ng-app="app">
+<head>
+<title>LabTS</title>
+<meta content="authenticity_token" name="csrf-param"/>
+<meta content="REDACTED" name="csrf-token"/>
+</head>
+<body>
+<div class="container">
+
+ Space for LabTS MOTD  
+
+      <div><p class="deny">
+<strong>Notice:</strong> Due to essential data centre maintenance, several DoC systems (including LabTS) will be unavailable from the afternoon on Friday 23rd Jan until the morning on Monday 26th Jan. All CW deadlines have been updated to fall outside this window, but LabTS will probably be unable to process any test requests during this period.
+        
+        Due to a DoC filesystem issue LabTS is unable to process any test requests. CSG are working on the issue. Sorry for any inconvenience. 
+      
+      </p></div>
+<div class="text-center">
+  Milestone:
+  <select id="switch_milestone" name="switch_milestone" onchange="location.href = '?milestone=' + encodeURIComponent(this.options[this.selectedIndex].value)">
+<option selected="'selected'" value="1095">
+        Reuse
+      </option>
+</select>
+</div>
+<div class="text-center">
+<br/>
+<span class="label label-danger" style="font-size:12px"> Warning: Submitted Commit Does Not Match This Repo </span>
+</div>
+<table ,="" class="table table-striped table-bordered table-condensed" id="commit_table" style="width: 80%; left: 10%; position: relative;">
+<thead>
+<tr>
+<td> Submission Status </td>
+<td> Commit Hash </td>
+<td> Commit Message </td>
+<td> Commit Date </td>
+<td> Testing Status </td>
+<td> Test Result </td>
+<td> Request Test </td>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: center; vertical-align: middle;">
+<form action="https://teaching.doc.ic.ac.uk/labts/lab_exercises/2324/exercises/784/repository/100851/commit/98f04305834a91c8c099f7a19458e631f86fba87/milestone/1095/late_submit" class="button_to" method="post"><input class="btn btn-danger" data-confirm="Are you absolutely sure you want to do this?! Your submission will be classified as late (unless you have previously arranged an extension).
+ Please also ensure that your test request has completed before confirming a late submission.
+ Note that submissions more than 14 days late will not be accepted by Scientia" style="font-size: 12px;" type="submit" value="Submit this Commit Late"/><input name="authenticity_token" type="hidden" value="pGVMdFR1xVk7l5AAaPEfthy+QDY0ugIsvJbyQl2ZSNJ1tYeK+g1DlxXmxnKmRxqGnyXRJ/54cl6Mmz2384y81Q=="/></form>
+</td>
+<td> <a href="https://gitlab.doc.ic.ac.uk/lab2324_autumn/SED_Ex3_abc123/commit/98f04305834a91c8c099f7a19458e631f86fba87">0c4c482c</a> </td>
+<td> Inital files for exercise </td>
+<td> 2022-08-08 13:34:03 UTC </td>
+<td>
+</td>
+<td>
+        Currently Untested
+    </td>
+<td>
+<form action="https://teaching.doc.ic.ac.uk/labts/lab_exercises/2324/exercises/784/repository/100851/request?commit_id=1087892&amp;milestone=1095" class="button_to" method="post"><input class="btn btn-primary" style="font-size: 12px;" type="submit" value="Request test"/><input name="authenticity_token" type="hidden" value="nbiqM+jZQWD2fVx7sam0PiftTzbEVmi8QlL+Fb7E9aZMaGHNRqHHrtgMCgl/H7EOpHbeJw6UGM5yXzHgENEBoQ=="/></form>
+</td>
+</tr>
+</tbody>
+</table>
+<div class="text-center">
+<div class="btn-group">
+<a class="btn btn-primary" href="https://gitlab.doc.ic.ac.uk/lab2324_autumn/SED_Ex3_abc123" style="font-size: 12px;">View this repository on Gitlab</a>
+</div>
+</div>
+<table class="table table-bordered table-condensed" style="width: 80%; left: 10%; position: relative;">
+<tbody>
+<tr>
+<td> Clone this repository via ssh: </td>
+<td> git clone git@gitlab.doc.ic.ac.uk:lab2324_autumn/SED_Ex3_abc123.git</td>
+</tr>
+<tr>
+<td> Clone this repository via https: </td>
+<td> git clone https://gitlab.doc.ic.ac.uk/lab2324_autumn/SED_Ex3_abc123.git</td>
+</tr>
+</tbody>
+</table>
+<div>
+  Most of the time, this table should mirror the master branch of your repo as shown on gitlab. However, occasionally we may miss a commit if the server is updated or goes down at exactly the wrong moment.
+
+  If a commit takes more than a minute to appear on this page, then please:
+  <form action="https://teaching.doc.ic.ac.uk/labts/lab_exercises/2324/exercises/784/repository/100851" class="button_to" data-remote="true" method="post" style="display:inline-block;"><input class="btn btn-primary" style="font-size: 12px;" type="submit" value="click here to refresh manually."/><input name="authenticity_token" type="hidden" value="TvK6wlX67mgK4Y77DRuOh/DrccRfLUBtMi9UjLFxE1ufInE8+4JopiSQ2InDrYu3c3Dg1ZXvMB8CIpt5H2TnXA=="/></form>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,42 @@
+[project]
+name = "imperial-doc-download"
+version = "0.1.0"
+description = "Download my data from Imperial College Department of Computing systems before graduation"
+readme = "README.md"
+authors = [
+    { name = "Kishan Sambhi", email = "kishansambhi@hotmail.co.uk" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "typer>=0.15",
+    "rich>=13.7",
+    "httpx>=0.27",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.2",
+]
+
+[project.scripts]
+imperial-doc-download = "imperial_doc_download.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["uv_build>=0.8.17,<0.9.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# B008: typer's `= typer.Option(...)` / `= typer.Argument(...)` defaults are the
+# documented way to declare CLI parameters, not an accidental mutable default.
+ignore = ["B008"]
