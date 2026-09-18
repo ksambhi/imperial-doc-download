@@ -6,8 +6,9 @@ interesting part is testable offline against the real rows.
 
 Scope is **exercises with a mark** (plan §1). That is narrower than what
 the download step walks: an unattempted tutorial has a spec worth keeping
-but nothing to record. It also means only the `individual` and `group`
-categories can appear here.
+but nothing to record. It does *not* exclude unassessed exercises —
+a zero-weighted progress test can be marked 10/10 and belongs in the
+record, coloured brown exactly as the page colours it.
 
 Deliberately absent: `mark.marker`, `marks_published_by` and `locked_by`
 are staff usernames, and the page doesn't show them. They stay in the
@@ -25,13 +26,12 @@ from imperial_doc_download.emarking_fetch.grading import (
     category_for,
     grade_boundaries_payload,
     grade_for,
+    is_assessed,
     percentage_of,
 )
 from imperial_doc_download.emarking_fetch.models import Exercise, Module
 
-#: Only these two can occur once unmarked exercises are filtered out, so
-#: only these two are advertised in the file's legend.
-_REACHABLE = tuple(c for c in CATEGORIES if c.category in ("individual", "group"))
+_BY_CATEGORY = {c.category: c for c in CATEGORIES}
 
 
 def build_record(
@@ -53,10 +53,26 @@ def build_record(
         "generated_at": generated_at,
         "username": username,
         "grade_boundaries": grade_boundaries_payload(),
-        "categories": categories_payload(_REACHABLE),
+        "categories": categories_payload(_present_categories(years)),
         "summary": _summary(years),
         "years": years,
     }
+
+
+def _present_categories(years: dict[str, list[dict[str, Any]]]) -> tuple:
+    """Just the legend rows this record actually uses.
+
+    Which ones occur depends on the data, not on a rule we can state up
+    front: the has-a-mark filter rules out most grey rows but not all
+    brown ones, since a zero-weighted exercise can still be marked.
+    """
+    present = {
+        exercise["category"]
+        for modules in years.values()
+        for module in modules
+        for exercise in module["exercises"]
+    }
+    return tuple(c for c in CATEGORIES if c.category in present)
 
 
 def _modules_for_year(
@@ -91,8 +107,9 @@ def _exercise(exercise: Exercise) -> dict[str, Any]:
     maximum = exercise.maximum_mark
     percentage = percentage_of(value, maximum)
     pass_mark = exercise.pass_mark
+    assessed = is_assessed(exercise.weight)
     category = category_for(
-        marked=True,
+        assessed=assessed,
         has_submission=bool(exercise.submissions),
         requires_group=exercise.requires_group,
     )
@@ -105,6 +122,7 @@ def _exercise(exercise: Exercise) -> dict[str, Any]:
         "category": category.category,
         "colour": category.colour,
         "category_label": category.label,
+        "assessed": assessed,
         "requires_group": exercise.requires_group,
         "deadline": exercise.end,
         "extended_deadline": exercise.extended_end,

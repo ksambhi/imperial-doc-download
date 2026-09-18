@@ -33,8 +33,13 @@ from imperial_doc_download.emarking_fetch.models import (
     enrolled_modules,
 )
 from imperial_doc_download.emarking_fetch.proxy import SocksProxy
+from imperial_doc_download.emarking_fetch.results_html import (
+    feedback_links_from_manifest,
+    render_results,
+)
 from imperial_doc_download.emarking_fetch.step import (
     ENROLMENT_CACHE_FILENAME,
+    MANIFEST_FILENAME,
     YEAR_CACHE_FILENAME,
     read_year_cache,
 )
@@ -43,6 +48,7 @@ from imperial_doc_download.pipeline import PipelineContext, Step
 logger = logging.getLogger(__name__)
 
 MARKS_FILENAME = "emarking-marks.json"
+RESULTS_FILENAME = "emarking-results.html"
 
 
 class EmarkingMarksStep(Step):
@@ -80,8 +86,30 @@ class EmarkingMarksStep(Step):
         path.write_text(json.dumps(record, indent=2), encoding="utf-8")
         logger.info("Wrote %s", path)
 
+        html_path = ctx.output_dir / RESULTS_FILENAME
+        html_path.write_text(render_results(record, self._feedback_links(ctx)), encoding="utf-8")
+        logger.info("Wrote %s", html_path)
+
         ctx.state["emarking_marks"] = record
-        self._print_report(record, path)
+        self._print_report(record, path, html_path)
+
+    @staticmethod
+    def _feedback_links(ctx: PipelineContext) -> dict[tuple[str, str, int], str]:
+        """Where each feedback PDF landed, for the page to link at.
+
+        Read from the manifest rather than guessed from the layout, so a
+        file that 403'd or failed shows a dash instead of a dead link.
+        """
+        path = ctx.output_dir / MANIFEST_FILENAME
+        if not path.is_file():
+            logger.info("No %s, so the results page will have no feedback links.", path)
+            return {}
+        try:
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            logger.warning("%s is unreadable — the results page will have no links.", path)
+            return {}
+        return feedback_links_from_manifest(manifest)
 
     # ------------------------------------------------------------- loading
 
@@ -163,7 +191,7 @@ class EmarkingMarksStep(Step):
 
     # ------------------------------------------------------------ reporting
 
-    def _print_report(self, record: dict, path: Path) -> None:
+    def _print_report(self, record: dict, path: Path, html_path: Path) -> None:
         console = Console()
 
         for year, modules in sorted(record["years"].items()):
@@ -191,7 +219,7 @@ class EmarkingMarksStep(Step):
         summary = record["summary"]
         console.print(
             f"{summary['exercises']} marked exercise(s) across {summary['modules']} module(s) "
-            f"and {summary['years']} year(s)\n  → {path}"
+            f"and {summary['years']} year(s)\n  → {path}\n  → {html_path}"
         )
 
 

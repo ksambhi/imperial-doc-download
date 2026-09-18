@@ -34,6 +34,7 @@ imperial-doc-download/
 │       │   ├── naming.py       #   pure: FS-safe names, header parsing
 │       │   ├── grading.py      #   pure: grade boundaries, status colours
 │       │   ├── marks.py        #   pure: builds the marks record
+│       │   ├── results_html.py #   pure: renders the results page
 │       │   ├── step.py         #   the download Step
 │       │   └── marks_step.py   #   the marks-record Step
 │       └── scientia_fetch/     # placeholder: Scientia (timetable/exams)
@@ -248,9 +249,21 @@ the page derives both in the browser. The boundaries (`A*` ≥ 80, `A` ≥ 70,
 explains its own vocabulary. Colours follow the page: green is an
 individual exercise, purple a group one.
 
-This step costs no requests — it reshapes what the download step already
-has, or reads it back off disk. `imperial-doc-download emarking-marks`
-rebuilds it on its own without touching the network.
+It also writes **`emarking-results.html`**: a local reconstruction of the
+eMarking coursework-results page, self-contained so it still opens once
+the account is gone. Three differences from the original — a dark/light
+toggle (the real page is dark only), tabs per academic year rather than
+per section, and **Feedback links that download the PDF saved next to the
+page** instead of calling an API you may no longer be able to reach. The
+`download` attribute renames them on the way out, because feedback files
+are named after a person rather than the exercise — yours arrive as
+`<username>.pdf`, and a group exercise's after whichever teammate it was
+distributed to, so otherwise you'd collect a pile of identically-named
+files.
+
+Both steps cost no requests — they reshape what the download step already
+has, or read it back off disk. `imperial-doc-download emarking-marks`
+rebuilds both files on its own without touching the network.
 
 Two things here that look wrong until you check them:
 
@@ -258,9 +271,12 @@ Two things here that look wrong until you check them:
   marked exercises have a `pass_mark` larger than their own
   `maximum_mark` (40, out of a maximum of 10). Comparing it against the
   raw mark reports failures that never happened.
-- **The colour's precedence is assessment before group-ness.** An
-  unmarked *group* exercise is brown or grey, not purple — there is no
-  fifth "unassessed group" swatch.
+- **"Unassessed" means zero-weighted, not unmarked.** A progress test can
+  be submitted, marked 10/10 and graded `A*` and still be unassessed,
+  because it contributes nothing to the module — the page colours those
+  brown. The rule is `weight > 0`, and precedence is assessment before
+  group-ness, so an unassessed *group* exercise is brown or grey rather
+  than purple.
 
 Some things the live API does that the code is built around, rather than
 assuming otherwise — the evidence is in `docs/emarking-fetch-plan.md` §9:

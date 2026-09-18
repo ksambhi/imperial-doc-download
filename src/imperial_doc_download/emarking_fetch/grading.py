@@ -38,13 +38,10 @@ class Category:
     label: str
 
 
-#: The four states of the status dot, verified against all seven rows of
-#: the personal-record page ✅ (plan §5).
+#: The four states of the status dot, verified against the rendered page ✅.
 #:
-#: Only `individual` and `group` can reach the marks record, because it
-#: keeps marked exercises only — but the unassessed pair is what makes
-#: the precedence rule in `category_for` testable, and it would be right
-#: already if the filter were ever relaxed.
+#: Note that `unassessed-with-submission` (brown) is perfectly capable of
+#: carrying a mark and a grade -- see `is_assessed`.
 CATEGORIES: tuple[Category, ...] = (
     Category("individual", "green", "Individual Exercise"),
     Category("group", "purple", "Group Exercise"),
@@ -83,15 +80,27 @@ def grade_for(percentage: float | None) -> str | None:
     return GRADE_BOUNDARIES[-1][0]  # pragma: no cover - the last row is `>= 0`
 
 
-def category_for(*, marked: bool, has_submission: bool, requires_group: bool) -> Category:
+def is_assessed(weight: float | None) -> bool:
+    """Whether an exercise counts toward the module result.
+
+    **"Unassessed" means zero-weighted, not unmarked** — the trap here,
+    and one the data will happily let you get wrong. A progress test can
+    be submitted, marked 10/10 and graded `A*` and still be unassessed,
+    because it contributes nothing to the module. The page colours those
+    brown, and every observed row agrees with `weight > 0` ✅.
+    """
+    return bool(weight)
+
+
+def category_for(*, assessed: bool, has_submission: bool, requires_group: bool) -> Category:
     """Which legend row this exercise falls under.
 
-    **Assessment first, then group-ness.** An unmarked group exercise is
-    brown or grey, not purple — there is no fifth "unassessed group"
+    **Assessment first, then group-ness.** An unassessed group exercise
+    is brown or grey, not purple — there is no fifth "unassessed group"
     colour in the legend, and getting this precedence backwards is the
     easy mistake.
     """
-    if not marked:
+    if not assessed:
         return _BY_CATEGORY[
             "unassessed-with-submission" if has_submission else "unassessed-no-submission"
         ]

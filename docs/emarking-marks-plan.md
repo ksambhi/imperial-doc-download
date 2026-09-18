@@ -9,7 +9,9 @@ plus the scope change in `client.py`/`models.py`/`step.py`. Everything
 marked ✅ was verified against the live API on 2026-09-18. Builds on
 `emarking-fetch-plan.md`, whose §1 safety rules apply unchanged.
 
-One thing the implementation found that this plan had wrong — see §6.2.
+Two things the implementation found that this plan had wrong — see §5.1
+and §6.2. Both were caught by checking output against the real page
+rather than by testing, which is worth remembering.
 
 This plan also carries the **enrolment-based scope change** to the
 existing download step (`emarking-fetch-plan.md` §3.3.1), because both
@@ -174,28 +176,47 @@ Four states in the legend, and they are a **derived classification, not
 an API field** — like the grade. Verified against all seven screenshot
 rows, 7/7 ✅:
 
-| Colour | Legend wording | Rule | In this record? |
-|---|---|---|---|
-| 🟢 green | Individual Exercise | marked, `requires_group` false | ✅ 91 |
-| 🟣 purple | Group Exercise | marked, `requires_group` true | ✅ 47 |
-| 🟤 brown | Unassessed, with submission | not marked, has submissions | ✗ excluded by §1 |
-| ⚫ grey | Unassessed, no submission | not marked, no submissions | ✗ excluded by §1 |
+| Colour | Legend wording | Rule |
+|---|---|---|
+| 🟢 green | Individual Exercise | assessed, `requires_group` false |
+| 🟣 purple | Group Exercise | assessed, `requires_group` true |
+| 🟤 brown | Unassessed, with submission | not assessed, has submissions |
+| ⚫ grey | Unassessed, no submission | not assessed, no submissions |
 
 Precedence is **assessment first, then group-ness**. A group exercise
-that was never marked is brown or grey, not purple — there is no fifth
+that isn't assessed is brown or grey, not purple — there is no fifth
 "unassessed group" colour.
+
+### 5.1 ⚠️ "Unassessed" means zero-weighted, not unmarked
+
+This plan originally keyed the colour on whether the exercise had a mark.
+That is wrong, and the second screenshot showed it plainly: `40008`'s
+progress tests are **submitted, marked 10/10 and graded `A*`**, and the
+page still colours them brown.
+
+Unassessed means *contributes nothing to the module result*. The field is
+`weight`, and every observed row agrees ✅:
+
+```
+40001/1 CW   weight=200  mark=48    -> green     (screenshot: green)
+40005/3 TUT  weight=0    mark=None  -> grey      (screenshot: grey)
+40008/1 PMT  weight=0    mark=10    -> brown     (screenshot: brown)
+40008/8 CW   weight=200  mark=30    -> green     (screenshot: green)
+40009/1 PPT  weight=0    mark=8     -> brown     (screenshot: brown)
+```
 
 ```python
 def category(exercise):
-    if exercise.mark is None:
+    if not exercise.weight:                     # not "if exercise.mark is None"
         return "unassessed-with-submission" if exercise.submissions else "unassessed-no-submission"
     return "group" if exercise.requires_group else "individual"
 ```
 
-The classifier stays complete even though the record's filter means only
-`individual` and `group` can ever reach the file. Two reasons: the brown
-and grey branches are what make the precedence rule testable, and if the
-filter is ever relaxed the function is already right.
+Consequence for §6: **brown is reachable in the record after all.** The
+has-a-mark filter excludes grey (nothing marked without a submission on
+this account) but keeps the marked-yet-unassessed progress tests, exactly
+as the page shows them. So the file's `categories` legend is built from
+the categories actually present rather than from a fixed pair.
 
 ## 6. Output schema
 
@@ -215,7 +236,9 @@ One file, `<output_dir>/emarking-marks.json`, all years:
   ],
   "categories": [
     { "category": "individual", "colour": "green",  "label": "Individual Exercise" },
-    { "category": "group",      "colour": "purple", "label": "Group Exercise" }
+    { "category": "group",      "colour": "purple", "label": "Group Exercise" },
+    { "category": "unassessed-with-submission", "colour": "brown",
+      "label": "Unassessed, with submission" }
   ],
   "summary": { "years": 4, "modules": 36, "exercises": 138 },
   "years": {

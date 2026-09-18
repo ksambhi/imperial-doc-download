@@ -215,8 +215,28 @@ class TestOrderingAndShape:
     def test_the_legend_and_boundaries_are_written_into_the_file(self) -> None:
         record = _record()
         assert record["grade_boundaries"][0] == {"grade": "A*", "min_percent": 80}
-        # Only the two reachable categories are advertised.
+        # Only the categories this record actually uses are advertised.
         assert [c["category"] for c in record["categories"]] == ["individual", "group"]
+
+    def test_a_marked_but_zero_weighted_exercise_is_brown_and_kept(self) -> None:
+        """The 40008 progress tests: marked 10/10, A*, and still brown.
+
+        They belong in the record -- they have marks -- but they are
+        unassessed, because they contribute nothing to the module.
+        """
+        exercises = [
+            *SCREENSHOT,
+            _exercise(
+                module_code="60001", number=9, title="PMT: Graphs", mark=10, maximum=10, weight=0
+            ),
+        ]
+        row = [r for r in _rows(_record(exercises)) if r["number"] == 9][0]
+        assert row["colour"] == "brown"
+        assert row["assessed"] is False
+        assert (row["mark"], row["grade"]) == (10, "A*")
+        # ...and the legend grows to mention it.
+        record = _record(exercises)
+        assert "unassessed-with-submission" in [c["category"] for c in record["categories"]]
 
     def test_pass_mark_is_a_percentage_not_a_raw_mark(self) -> None:
         """The trap: `pass_mark` looks like a mark and isn't.

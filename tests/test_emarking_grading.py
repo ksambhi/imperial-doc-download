@@ -17,6 +17,7 @@ from imperial_doc_download.emarking_fetch.grading import (
     category_for,
     grade_boundaries_payload,
     grade_for,
+    is_assessed,
     percentage_of,
 )
 
@@ -89,36 +90,59 @@ class TestGradeFor:
         assert minimums[-1] == 0  # so every percentage lands somewhere
 
 
+class TestIsAssessed:
+    """ "Unassessed" means zero-weighted, **not** unmarked."""
+
+    @pytest.mark.parametrize("weight", [1, 50, 100, 200])
+    def test_a_weighted_exercise_is_assessed(self, weight: int) -> None:
+        assert is_assessed(weight) is True
+
+    @pytest.mark.parametrize("weight", [0, None])
+    def test_zero_or_missing_weight_is_unassessed(self, weight: int | None) -> None:
+        assert is_assessed(weight) is False
+
+
 class TestCategoryFor:
-    def test_marked_individual_is_green(self) -> None:
-        result = category_for(marked=True, has_submission=True, requires_group=False)
+    def test_assessed_individual_is_green(self) -> None:
+        result = category_for(assessed=True, has_submission=True, requires_group=False)
         assert (result.category, result.colour) == ("individual", "green")
 
-    def test_marked_group_is_purple(self) -> None:
-        result = category_for(marked=True, has_submission=True, requires_group=True)
+    def test_assessed_group_is_purple(self) -> None:
+        result = category_for(assessed=True, has_submission=True, requires_group=True)
         assert (result.category, result.colour) == ("group", "purple")
 
-    def test_marked_without_a_submission_still_takes_its_colour(self) -> None:
+    def test_assessed_without_a_submission_still_takes_its_colour(self) -> None:
         # The 60015 row: marked 87/100, never submitted, no feedback.
-        result = category_for(marked=True, has_submission=False, requires_group=False)
+        result = category_for(assessed=True, has_submission=False, requires_group=False)
         assert result.colour == "green"
 
     def test_unassessed_with_a_submission_is_brown(self) -> None:
-        result = category_for(marked=False, has_submission=True, requires_group=False)
+        result = category_for(assessed=False, has_submission=True, requires_group=False)
         assert (result.category, result.colour) == ("unassessed-with-submission", "brown")
 
     def test_unassessed_without_a_submission_is_grey(self) -> None:
-        result = category_for(marked=False, has_submission=False, requires_group=False)
+        result = category_for(assessed=False, has_submission=False, requires_group=False)
         assert (result.category, result.colour) == ("unassessed-no-submission", "grey")
+
+    def test_a_marked_but_zero_weighted_exercise_is_brown(self) -> None:
+        """The trap, stated as a test.
+
+        40008's progress tests are submitted, marked 10/10 and graded
+        `A*`, and the page still colours them brown — because they
+        contribute nothing to the module. A rule keyed on "has a mark"
+        would paint them green.
+        """
+        result = category_for(assessed=is_assessed(0), has_submission=True, requires_group=False)
+        assert result.colour == "brown"
 
     @pytest.mark.parametrize("has_submission", [True, False])
     def test_assessment_beats_group_ness(self, has_submission: bool) -> None:
-        """The easy mistake: an unmarked *group* exercise is not purple.
+        """An unassessed *group* exercise is not purple.
 
         There is no fifth "unassessed group" swatch in the legend, so
-        group-ness only decides the colour once something is marked.
+        group-ness only decides the colour once the exercise is assessed.
         """
-        result = category_for(marked=False, has_submission=has_submission, requires_group=True)
+        result = category_for(assessed=False, has_submission=has_submission, requires_group=True)
         assert result.colour != "purple"
         assert result.category.startswith("unassessed-")
 
