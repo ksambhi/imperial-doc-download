@@ -14,6 +14,7 @@ imperial-doc-download/
 │       ├── cli.py              # Typer app + `run` command
 │       ├── config.py           # Settings, loaded from env vars
 │       ├── logging.py          # coloured console + file logging
+│       ├── ssh.py              # shared: throwaway ssh config, keys, agent
 │       ├── pipeline/           # generic pipeline machinery
 │       │   ├── base.py         #   Step, PipelineContext
 │       │   └── runner.py       #   Pipeline: runs an ordered list of Steps
@@ -23,8 +24,14 @@ imperial-doc-download/
 │       │   ├── models.py       #   Exercise / Milestone
 │       │   └── step.py         #   the pipeline Step
 │       ├── gitlab_fetch/       # DoC GitLab: the repos  (implemented)
-│       │   ├── ssh.py          #   throwaway ssh config, keys, agent
+│       │   ├── ssh.py          #   the GitLab/gitolite Host blocks
 │       │   ├── cloning.py      #   what to clone where, and running git
+│       │   └── step.py         #   the pipeline Step
+│       ├── emarking_fetch/     # eMarking: coursework files  (implemented)
+│       │   ├── proxy.py        #   ssh -D SOCKS proxy into the DoC network
+│       │   ├── client.py       #   GET-only async client, retries, streaming
+│       │   ├── models.py       #   Exercise / Submission / Feedback
+│       │   ├── naming.py       #   pure: FS-safe names, header parsing
 │       │   └── step.py         #   the pipeline Step
 │       └── scientia_fetch/     # placeholder: Scientia (timetable/exams)
 └── tests/
@@ -37,9 +44,9 @@ scratch `state` dict steps can use to pass data along, e.g. an
 authenticated session from a login step to the steps that use it).
 
 Each Imperial system to back up is its own self-contained module —
-`labts_fetch`, `gitlab_fetch`, `scientia_fetch`, and so on — each
-implementing one `Step` subclass. `labts_fetch` and `gitlab_fetch` are
-implemented; the rest are still placeholders. Each gets its own CLI
+`labts_fetch`, `gitlab_fetch`, `emarking_fetch`, and so on — each
+implementing one `Step` subclass. Those three are implemented;
+`scientia_fetch` is still a placeholder. Each gets its own CLI
 subcommand in `cli.py`, so pipelines can be built and run one at a time.
 (Module names use underscores, not hyphens — `-` isn't valid in a Python
 import name.)
@@ -160,6 +167,60 @@ Already-cloned repositories are left alone on the next run (that's what
 `gitlab-clones.json` is for), and a repository that failed is retried.
 `--force` re-clones everything from scratch, replacing what's there.
 
+### `emarking_fetch`
+
+Downloads every coursework artefact eMarking holds for this account —
+specs, submissions, supplementary files and feedback — into
+
+```
+<output_dir>/<year>/<module_code>/emarking/
+├── exercises.json                     this module's exercises
+└── <number>-<title>/
+    ├── exercise.json
+    ├── <module>_<n>_spec.pdf
+    ├── supplementary/<filename>
+    ├── submissions/<id>/<filename>
+    └── feedback/<id>/{metadata.json,<filename>}
+```
+
+with a record of everything in `<output_dir>/emarking-files.json`.
+
+**This one is read-only by construction, and deliberately so.** eMarking
+is not a reports system: among its routes are ones that submit coursework,
+edit feedback and write marks. So the client exposes exactly one place a
+request is issued, with `GET` as a literal, and there is no
+`post()`/`put()`/`delete()` helper anywhere — a test asserts both. It also
+only ever touches personal endpoints (`/me/*` and our own submissions),
+never the staff routes, and is sequential with a delay between requests by
+default because it's a shared teaching server.
+
+Both API hosts live behind the DoC firewall, so everything goes through an
+SSH SOCKS proxy (`ssh -N -D`) on a randomly chosen `shell1-5`, on a free
+ephemeral port picked at runtime. Keys, passphrases and the throwaway ssh
+config are handled by the same shared machinery the clone step uses.
+
+Re-runs are cheap and quiet. A file already on disk is left alone; an
+answer the API has settled is not asked about again — that includes model
+answers, which exist but are a `403` for students every time, and the 21
+of 25 academic years that answer `500`/`502` rather than coming back
+empty. `--force` redoes everything, and `--year 2526` re-checks a single
+year (worth doing for the current one, which can gain data after an empty
+run).
+
+Some things the live API does that the code is built around, rather than
+assuming otherwise — the evidence is in `docs/emarking-fetch-plan.md` §9:
+
+- `file_size` in the metadata is **not** reliable (some submissions claim
+  `0` and serve real content), so a transfer is verified against the
+  response's `Content-Length` instead
+- every feedback file is served as `<username>.pdf`, whatever the module,
+  hence the per-feedback-id directory
+- a submission can be a git commit rather than a file; those are recorded
+  and never requested (that endpoint `500`s for them — `gitlab_fetch` is
+  what has the code)
+- the largest artefact seen is 48 MB, so downloads stream to a temp file
+  and are renamed into place
+
 ## Usage
 
 ```bash
@@ -184,7 +245,19 @@ uv run imperial-doc-download gitlab --output-dir ./imperial-data
 
 # start over, four clones at a time
 uv run imperial-doc-download labts --output-dir ./imperial-data --force -j 4
+
+# download every coursework file from eMarking (needs IMPERIAL_DOC_SSH_KEY
+# for the SOCKS proxy). A re-run costs no requests for what it already has.
+uv run imperial-doc-download emarking --output-dir ./imperial-data
+
+# just one year, at a gentler rate
+uv run imperial-doc-download emarking --year 2526 --delay 2
 ```
+
+> **Don't `source` your `.env`.** If your password contains shell
+> metacharacters, `set -a; . ./.env` silently truncates it and you get a
+> `401` that looks exactly like an expired password. Export the variables,
+> or have whatever launches the tool parse the file literally.
 
 There is one subcommand per Imperial system, each running its own
 pipeline:
@@ -193,6 +266,7 @@ pipeline:
 |---|---|
 | `imperial-doc-download labts` | implemented — fetches the repository list, then clones |
 | `imperial-doc-download gitlab` | implemented — the clone half on its own |
+| `imperial-doc-download emarking` | implemented — coursework specs, submissions and feedback |
 | `imperial-doc-download scientia` | placeholder |
 
 Eventually the root command will run them all in parallel. That only

@@ -452,7 +452,7 @@ class EmarkingFetchStep(Step):
 
         kinds = ("spec", "model-answer", "supplementary", "submission", "feedback")
         for year, year_records in sorted(by_year.items()):
-            table = Table(title=f"{year} — {_downloaded_bytes(year_records)}")
+            table = Table(title=f"{year} — {len(year_records)} artefact(s)")
             table.add_column("Artefact")
             for column in ("Downloaded", "Cached", "Absent", "Forbidden", "Skipped", "Failed"):
                 table.add_column(column, justify="right")

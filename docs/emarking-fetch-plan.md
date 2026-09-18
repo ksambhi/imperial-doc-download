@@ -3,10 +3,22 @@
 Download every coursework submission, spec, model answer, supplementary
 file and feedback file from DoC's eMarking system.
 
-Status: **plan only, nothing implemented.** Everything marked ✅ was
-verified against the live API — including all of §9, which is now
-answered. Four of those answers changed the design; where they did, the
-section above says so and §9 has the evidence.
+Status: **implemented**, in `src/imperial_doc_download/emarking_fetch/`.
+Everything marked ✅ was verified against the live API — including all of
+§9, which is now answered. Four of those answers changed the design;
+where they did, the section above says so and §9 has the evidence.
+
+Two things the implementation added that aren't below:
+
+- **Empty years are remembered** in the manifest and not re-probed,
+  because §9.5 turned "an unused year comes back empty" into "an unused
+  year is a 500", and 21 deliberate server errors per run is exactly what
+  §1 says not to do. `--force`, or naming a year with `--year`, checks
+  again — which matters for the current academic year.
+- **The `ssh.py` in §7 didn't need writing.** The per-run temp dir, key
+  unlocking and private-agent flow moved out of `gitlab_fetch` into a
+  shared `imperial_doc_download.ssh.SshSession`, and `proxy.py` supplies
+  only the `Host` block and the `-D` tunnel on top of it.
 
 ## 1. Safety rules (non-negotiable)
 
